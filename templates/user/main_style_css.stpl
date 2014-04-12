@@ -1,5 +1,5 @@
 <!-- main_style_css.stpl --> {{-- Do not remove this line! --}}
-<style type="text/css" class="yf_core">
+{css(class=yf_core)}
 .sidebar-nav { padding: 9px 0; }
 
 .dropdown-menu .sub-menu { left: 100%; position: absolute; top: 0; visibility: hidden; margin-top: -1px; }
@@ -55,5 +55,5 @@ body.cssfw-bs3 a.accordion-toggle { display: block; }
 
 /* override styles per bs theme here */ 
 .bs-theme-slate textarea, .bs-theme-slate select { color: #52575c; }
-</style>
+{/css}
 <!-- /main_style_css.stpl --> {{-- Do not remove this line! --}}

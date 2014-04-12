@@ -1,13 +1,13 @@
 <!-- main_js.stpl --> {{-- Do not remove this line! --}}
-<script type="text/javascript" class="yf_core">
+{js(class=yf_core)}
 $(function(){
 	$('.yf_tip').popover({
 		'trigger' : 'hover',
 		'delay'   : { 'show' : 100, 'hide' : 500 }
 	})
 })
-</script>
-<script type="text/javascript" class="yf_core">
+{/js}
+{js(class=yf_core)}
 $(function(){
 	// http://test2.dev/dynamic/ajax_validate/?func=is_unique&param=user.login&data=test
 	var yf_ajax_link_validate = '{url(dynamic,ajax_validate)}';
@@ -73,7 +73,7 @@ $(function(){
 		_this.closest('.input-group').after('&nbsp;<i class="ajax-validation-status icon icon-large ' + icon + '" style="color:' + color + ';" title="' + title + '"></i>');
 	}
 })
-</script>
+{/js}
 
 {if(const.DEBUG_MODE eq 1)}
 	{include("debug_console_js")}

@@ -13,7 +13,7 @@
 	{include( ng_app_js )}
 {/if}
 
-{execute_shutdown(graphics,show_css)}
+{exec_last(core_css,show)}
 
 {execute(graphics,show_metatags)}
 </head>
@@ -41,6 +41,6 @@
 {execute(common,show_messages)}
 {block(center_area)}
 	</div>
-{execute_shutdown(graphics,show_js)}
+{exec_last(core_js,show)}
 </body>
 </html>

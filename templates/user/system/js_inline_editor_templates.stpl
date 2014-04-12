@@ -1,4 +1,4 @@
-<script type="text/javascript">
+{js()}
 // Inline template editor code
 $(function(){
 
@@ -101,4 +101,4 @@ $(function(){
 	});
 
 })
-</script>
+{/js}

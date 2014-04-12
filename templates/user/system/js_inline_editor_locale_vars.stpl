@@ -1,4 +1,4 @@
-<script type="text/javascript">
+{js()}
 var _last_tr_item = null;
 var _last_tr_html = null;
 var _edited_value = null;
@@ -146,4 +146,4 @@ var _inline_editor_loaded = false;
 function _debug_catch(obj) {
 	$("span.locale_tr", $(obj)).on("click", _locale_tr_click_handle);
 }
-</script>
+{/js}

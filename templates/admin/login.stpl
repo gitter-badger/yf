@@ -5,6 +5,7 @@
 	<meta charset="utf-8">
 {execute(common,bs_theme_html)}
 {include("main_style_css")}
+{exec_last(core_css,show)}
 {execute(graphics,show_metatags)}
 	<style type="text/css">.container-valign-middle { margin:20% 30%; }</style>
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -14,5 +15,6 @@
 {execute(login_form,_admin_login_form)}
 	</div>
 	{include("main_js")}
+{exec_last(core_js,show)}
 </body>
 </html>

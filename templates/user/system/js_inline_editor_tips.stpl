@@ -1,4 +1,4 @@
-<script type="text/javascript">
+{js()}
 // Inline tips editor code
 $(function(){
 
@@ -110,4 +110,4 @@ $(function(){
 	});
 
 })
-</script>
+{/js}
