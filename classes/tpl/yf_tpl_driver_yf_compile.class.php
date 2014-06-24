@@ -93,7 +93,7 @@ class yf_tpl_driver_yf_compile {
 			'/\{(e|user_error)\(\s*["\']{0,1}([\w\.-]+)["\']{0,1}\s*\)\}/ims'
 				=> $_php_start.'echo common()->_show_error_inline(\'$2\');'.$_php_end,
 
-			'/(\{include\(\s*["\']{0,1})\s*([\w\\/\.]+)\s*["\']{0,1}?\s*[,;]{0,1}\s*([^"\'\)\}]*)\s*(["\']{0,1}\s*\)\})/i'
+			'/(\{include\(\s*["\']{0,1})\s*([@:\w\\/\.]+)\s*["\']{0,1}?\s*[,;]{0,1}\s*([^"\'\)\}]*)\s*(["\']{0,1}\s*\)\})/i'
 				=> $_php_start. 'echo $this->_include_stpl(\'$2\',\'$3\',$replace);'. $_php_end,
 // TODO: add support for {include_if_exists()}
 
@@ -101,7 +101,7 @@ class yf_tpl_driver_yf_compile {
 				=> $_php_start. 'echo $2;'. $_php_end,
 
 			'/\{catch\(\s*["\']{0,1}([a-z0-9_]+?)["\']{0,1}\s*\)\}(.*?)\{\/catch\}/ims'
-				=> $_php_start. 'ob_start();'. $_php_end. '$2'. $_php_start. '$replace["$1"] = ob_get_contents(); ob_end_clean();'. $_php_end,
+				=> $_php_start. 'ob_start();'. $_php_end. '$2'. $_php_start. '$replace["$1"] = ob_get_clean();'. $_php_end,
 
 			'/\{cleanup\(\s*\)\}(.*?)\{\/cleanup\}/ims'
 				=> $_php_start. 'echo trim(str_replace(array("\r","\n","\t"),"",stripslashes(\'$1\')));'. $_php_end,

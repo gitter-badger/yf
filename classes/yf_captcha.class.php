@@ -79,9 +79,8 @@ class yf_captcha {
 	/**
 	* Catch missing method call
 	*/
-	function __call($name, $arguments) {
-		trigger_error(__CLASS__.': No method '.$name, E_USER_WARNING);
-		return false;
+	function __call($name, $args) {
+		return main()->extend_call($this, $name, $args);
 	}
 
 	/**
@@ -220,7 +219,7 @@ class yf_captcha {
 		$VALID_CODE = false;
 
 		if (empty($_POST[$field_in_form])) {
-			_re('Please enter code');
+			_re('Please enter code', $field_in_form);
 		} else {
 			$hash = md5($this->secret_key. $_POST[$field_in_form]);
 			if ($this->use_cookies) {
@@ -233,7 +232,7 @@ class yf_captcha {
 				}
 			}
 			if ($code_incorrect) {
-				_re('Code you entered is incorrect');
+				_re('Code you entered is incorrect', $field_in_form);
 			} else {
 				$VALID_CODE = true;
 			}

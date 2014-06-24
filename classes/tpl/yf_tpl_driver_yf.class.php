@@ -77,8 +77,8 @@ class yf_tpl_driver_yf {
 	/**
 	* Compile given template into pure PHP code
 	*/
-	function _compile($name, $replace = array(), $string = '') {
-		return _class('tpl_driver_yf_compile', 'classes/tpl/')->_compile($name, $replace, $string);
+	function _compile($name, $replace = array(), $string = '', $params = array()) {
+		return _class('tpl_driver_yf_compile', 'classes/tpl/')->_compile($name, $replace, $string, $params);
 	}
 
 	/**
@@ -129,8 +129,7 @@ class yf_tpl_driver_yf {
 
 		ob_start();
 		include ($path);
-		$string = ob_get_contents();
-		ob_end_clean();
+		$string = ob_get_clean();
 
 		$this->_set_cache_details($name, $string, $stpl_time_start);
 		return $string;
@@ -161,11 +160,10 @@ class yf_tpl_driver_yf {
 
 			ob_start();
 			include ($compiled_path);
-			$string = ob_get_contents();
-			ob_end_clean();
+			$string = ob_get_clean();
 
 			if ($this->tpl->COMPILE_CHECK_STPL_CHANGED) {
-				$stpl_path = $this->tpl->_get_template_file($name, $params['get_from_db'], 0, 1);
+				$stpl_path = $this->tpl->_get_template_file($name, $params['force_storage'], 0, 1);
 				if ($stpl_path) {
 					$source_mtime = filemtime($stpl_path);
 				}
@@ -200,7 +198,8 @@ class yf_tpl_driver_yf {
 	/**
 	*/
 	function _parse_get_cached($name, $replace = array(), $params = array(), $string = false) {
-		if (isset($this->CACHE[$name]) && !$params['no_cache']) {
+		$force_storage = $params['force_storage'];
+		if (isset($this->CACHE[$name]) && !$params['no_cache'] && !$force_storage) {
 			$string = $this->CACHE[$name]['string'];
 			$this->CACHE[$name]['calls']++;
 			if (DEBUG_MODE) {
@@ -208,18 +207,18 @@ class yf_tpl_driver_yf {
 			}
 		} else {
 			if (empty($string) && !isset($params['string'])) {
-				$string = $this->tpl->_get_template_file($name, $params['get_from_db']);
+				$string = $this->tpl->_get_template_file($name, $params['force_storage']);
 			}
 			if ($string === false) {
 				return false;
 			}
 			$string = preg_replace($this->_PATTERN_COMMENT, '', $string);
 			if ($this->tpl->COMPILE_TEMPLATES) {
-				$this->_compile($name, $replace, $string);
+				$this->_compile($name, $replace, $string, $params);
 			}
 			if (isset($params['no_cache']) && !$params['no_cache']) {
-				$this->CACHE[$name]['string']   = $string;
-				$this->CACHE[$name]['calls']	= 1;
+				$this->CACHE[$force_storage. $name]['string']   = $string;
+				$this->CACHE[$force_storage. $name]['calls']	= 1;
 			}
 		}
 		return $string;
@@ -229,14 +228,25 @@ class yf_tpl_driver_yf {
 	*/
 	function _process_includes($string, $replace = array(), $name = '') {
 		$_this = $this;
-		$pattern = '/\{(include|include_if_exists)\(\s*["\']{0,1}\s*([\w\\/\.]+)\s*["\']{0,1}?\s*[,;]{0,1}\s*([^"\'\)\}]*)\s*["\']{0,1}\s*\)\}/i';
+		$pattern = '/\{(include|include_if_exists)\(\s*["\']{0,1}\s*([@:\w\\/\.]+)\s*["\']{0,1}?\s*[,;]{0,1}\s*([^"\'\)\}]*)\s*["\']{0,1}\s*\)\}/i';
 		$extra = array();
 		$func = function($m) use ($replace, $name, $_this, $extra) {
 			$if_exists = ($m[1] == 'include_if_exists');
 			$stpl_name = $m[2];
 			$_replace = $m[3];
-			if ($if_exists && !tpl()->exists($stpl_name)) {
+			$force_storage = '';
+			// Force to include template from special storage, example: @framework:script_js
+			if ($stpl_name[0] == '@') {
+				list($force_storage, $stpl_name) = explode(':', substr($stpl_name, 1));
+			}
+			if ($if_exists && !tpl()->exists($stpl_name, $force_storage)) {
 				return false;
+			}
+			$prevent_name = $name.'__'.$m[0];
+			if (isset($_this->_include_recursion_prevent[$prevent_name])) {
+				return false;
+			} else {
+				$_this->_include_recursion_prevent[$prevent_name] = true;
 			}
 			// Here we merge/override incoming $replace with parsed params, to be passed to included template
 			foreach ((array)explode(';', str_replace(array('\'','"'), '', $_replace)) as $v) {
@@ -246,7 +256,7 @@ class yf_tpl_driver_yf {
 					$replace[$a_name] = trim($a_val);
 				}
 			}
-			return $_this->parse($stpl_name, $replace);
+			return $_this->parse($stpl_name, $replace, array('force_storage' => $force_storage));
 		};
 		return preg_replace_callback($pattern, $func, $string);
 	}
@@ -341,9 +351,6 @@ class yf_tpl_driver_yf {
 	* Replace JS/CSS related patterns
 	*/
 	function _process_js_css($string, $replace = array(), $name = '') {
-// TODO: unit tests
-// TODO: ability to pass params (current requirement is to pass: class="yf_core")
-// TODO: shortcuts: {css(k1=v1)} .class { selectors} {/css}, {js(k1=v1)} some script inside {/css}, 
 		// CSS smart inclusion. Examples: {require_css(http//path.to/file.css)}, {catch(tpl_var)}.some_css_class {} {/catch} {require_css(tpl_var)}
 		$string = preg_replace_callback('/\{(css|require_css)\(\s*["\']{0,1}([^"\'\)\}]*?)["\']{0,1}\s*\)\}\s*(.+?)\s*{\/(css|require_css)\}/ims', function($m) use ($_this) {
 			$func = $m[1];
@@ -437,6 +444,11 @@ class yf_tpl_driver_yf {
 		$string = preg_replace_callback('/\{([a-z0-9\-\_]+)\.([a-z0-9\-\_]+)\|([a-z0-9\-\_\|]+)\}/ims', function($m) use ($replace, $name, $_this) {
 			return $_this->tpl->_process_var_filters($replace[$m[1]][$m[2]], $m[3]);
 		}, $string);
+
+		// Custom patterns support (intended to be used inside modules/plugins)
+		foreach ((array)$_this->tpl->_custom_patterns as $pattern => $func) {
+			$string = preg_replace_callback($pattern, function($m) use ($replace, $name, $_this, $func) { return $func($m, $replace, $name, $_this); }, $string);
+		}
 
 		// Evaluate custom PHP code pattern. Examples: {eval_code(print_r(_class('forum')))}
 		if ($this->tpl->ALLOW_EVAL_PHP_CODE) {
@@ -547,8 +559,7 @@ class yf_tpl_driver_yf {
 
 		ob_start();
 		$result = eval('?>'.$string.'<'.'?p'.'hp return 1;');
-		$string = ob_get_contents();
-		ob_clean();
+		$string = ob_get_clean();
 
 		if (!$result) {
 			trigger_error('STPL: ERROR: wrong condition in template "'.$stpl_name.'"', E_USER_WARNING);
@@ -790,15 +801,7 @@ class yf_tpl_driver_yf {
 		if (!is_array($replace)) {
 			$replace = array();
 		}
-		// Try to process method params (string like attrib1=value1;attrib2=value2)
-		foreach ((array)explode(';', str_replace(array("'",''), '', $params)) as $v) {
-			$attrib_name	= '';
-			$attrib_value   = '';
-			if (false !== strpos($v, '=')) {
-				list($attrib_name, $attrib_value) = explode('=', trim($v));
-			}
-			$replace[trim($attrib_name)] = trim($attrib_value);
-		}
+		$replace = (array)_attrs_string2array($params) + (array)$replace;
 		return $this->parse($stpl_name, $replace);
 	}
 }

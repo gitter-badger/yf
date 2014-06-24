@@ -38,9 +38,7 @@ class yf_db {
 	/** @var bool Use locking for reconnects or not */
 	public $RECONNECT_USE_LOCKING	= 0;
 	/** @var array List of mysql error codes to use for reconnect tries. See also http://dev.mysql.com/doc/refman/5.0/en/error-messages-client.html */
-	public $RECONNECT_MYSQL_ERRORS	= array(
-		1053, 1317, 2000, 2002, 2003, 2004, 2005, 2006, 2008, 2012, 2013, 2020, 2027, 2055
-	);
+	public $RECONNECT_MYSQL_ERRORS	= array(1053, 1317, 2000, 2002, 2003, 2004, 2005, 2006, 2008, 2012, 2013, 2020, 2027, 2055);
 	/** @var string */
 	public $RECONNECT_LOCK_FILE_NAME	= 'db_cannot_connect_[DB_HOST]_[DB_NAME]_[DB_USER]_[DB_PORT].lock';
 	/** @var int Time in seconds between unlock reconnect */
@@ -107,8 +105,6 @@ class yf_db {
 	public $QUERY_REVISIONS			= false;
 	/** @var bool update_safe, insert_safe, update_batch_safe: use additional checking for exising table fields */
 	public $FIX_DATA_SAFE			= true;
-	/** @var array List of tables inside current database */
-	public $_PARSED_TABLES			= array();
 	/** @var array Filled automatically from generated file */
 	public $_need_sys_prefix		= array();
 
@@ -123,9 +119,8 @@ class yf_db {
 	/**
 	* Constructor
 	*/
-	function __construct($db_type = '', $no_parse_tables = 0, $db_prefix = null, $db_replication_slave = null) {
+	function __construct($db_type = '', $db_prefix = null, $db_replication_slave = null) {
 		$this->_load_tables_with_sys_prefix();
-		$this->_no_parse_tables = $no_parse_tables;
 		// Type/driver of database server
 		$this->DB_TYPE = !empty($db_type) ? $db_type : DB_TYPE;
 		if (!defined('DB_PREFIX') && empty($db_prefix)) {
@@ -155,9 +150,8 @@ class yf_db {
 	/**
 	* Catch missing method call
 	*/
-	function __call($name, $arguments) {
-		trigger_error(__CLASS__.': No method '.$name, E_USER_WARNING);
-		return false;
+	function __call($name, $args) {
+		return main()->extend_call($this, $name, $args);
 	}
 
 	/**
@@ -189,23 +183,40 @@ class yf_db {
 	* Connect db driver and then connect to db
 	*/
 	function connect($db_host = '', $db_user = '', $db_pswd = null, $db_name = '', $force = false, $db_ssl = false, $db_port = '', $db_socket = '', $db_charset = '', $allow_auto_create_db = null) {
+		if (is_array($db_host)) {
+			$params = $db_host;
+			$db_host = '';
+		}
+		if (!is_array($params)) {
+			$params = array();
+		}
+		if ($params['reconnect']) {
+			$force = true;
+		}
 		if (!empty($this->_tried_to_connect) && !$force) {
 			return $this->_connected;
 		}
 		$this->_connect_start_time = microtime(true);
+		if (!$params['reconnect']) {
+			$this->DB_HOST = ($params['host'] ?: $db_host) ?: (defined('DB_HOST') ? DB_HOST : 'localhost');
+			$this->DB_USER = ($params['user'] ?: $db_user) ?: (defined('DB_USER') ? DB_USER : 'root');
+			$this->DB_PSWD = ($params['pswd'] ?: $db_pswd) ?: (defined('DB_PSWD') ? DB_PSWD : '');
+			$this->DB_NAME = ($params['name'] ?: $db_name) ?: (defined('DB_NAME') ? DB_NAME : '');
+			$this->DB_PORT = ($params['port'] ?: $db_port) ?: (defined('DB_PORT') ? DB_PORT : 3306);
+			$this->DB_SOCKET = ($params['socket'] ?: $db_socket) ?: (defined('DB_SOCKET') ? DB_SOCKET : '');
+			$this->DB_SSL = ($params['ssl'] ?: $db_ssl) ?: (defined('DB_SSL') ? DB_SSL : false);
+			$this->DB_CHARSET = ($params['charset'] ?: $db_charset) ?: (defined('DB_CHARSET') ? DB_CHARSET : '');
+			if (isset($params['prefix'])) {
+				$this->DB_PREFIX = $params['prefix'];
+			}
+			$allow_auto_create_db = isset($params['auto_create_db']) ? $params['auto_create_db'] : $allow_auto_create_db;
+			if (!is_null($allow_auto_create_db)) {
+				$this->ALLOW_AUTO_CREATE_DB	= $allow_auto_create_db;
+			}
+		}
 		$driver_class_name = main()->load_class_file('db_driver_'. $this->DB_TYPE, $this->DB_DRIVERS_DIR);
-		$this->DB_HOST		= !empty($db_host)		? $db_host		: DB_HOST;
-		$this->DB_USER		= !empty($db_user)		? $db_user		: DB_USER;
-		$this->DB_PSWD		= !is_null($db_pswd)	? $db_pswd		: (defined('DB_PSWD') ? DB_PSWD : '');
-		$this->DB_NAME		= !empty($db_name)		? $db_name		: DB_NAME;
-		$this->DB_PORT		= !empty($db_port)		? $db_port		: (defined('DB_PORT') ? DB_PORT : '');
-		$this->DB_SOCKET	= !empty($db_socket)	? $db_socket	: (defined('DB_SOCKET') ? DB_SOCKET : '');
-		$this->DB_SSL		= !empty($db_ssl)		? $db_ssl		: (defined('DB_SSL') ? DB_SSL : false);
-		$this->DB_CHARSET	= !empty($db_charset)	? $db_charset	: (defined('DB_CHARSET') ? DB_CHARSET : '');
-		$this->ALLOW_AUTO_CREATE_DB	= !is_null($allow_auto_create_db) ? $allow_auto_create_db : $this->ALLOW_AUTO_CREATE_DB;
 		// Create new instanse of the driver class
 		if (!empty($driver_class_name) && class_exists($driver_class_name) && !is_object($this->db)) {
-			// Set lock file
 			if ($this->RECONNECT_USE_LOCKING) {
 				$lock_file = $this->_get_reconnect_lock_path($this->DB_HOST, $this->DB_USER, $this->DB_NAME, $this->DB_PORT);
 				clearstatcache();
@@ -301,15 +312,12 @@ class yf_db {
 			// Try to reconnect if we see some these errors: http://dev.mysql.com/doc/refman/5.0/en/error-messages-client.html
 			if (false !== strpos($this->DB_TYPE, 'mysql') && in_array($db_error['code'], $this->RECONNECT_MYSQL_ERRORS)) {
 				$this->db = null;
-				$reconnect_successful = $this->connect($this->DB_HOST, $this->DB_USER, $this->DB_PSWD, $this->DB_NAME, true, $this->DB_SSL, $this->DB_PORT, $this->DB_SOCKET, $this->DB_CHARSET, $this->ALLOW_AUTO_CREATE_DB);
+				$reconnect_successful = $this->connect(array('reconnect' => true));
 				if ($reconnect_successful) {
 					$result = $this->db->query($sql);
 				}
 			}
 		}
-// TODO: if query with 1 or more joined tables and all of them not exists 
-//		- then we need to try several times, checking that error changing
-//      as mysql will not tell all missing tables at once, only one-by-one
 		if (!$result && $query_allowed && $db_error && $this->ERROR_AUTO_REPAIR) {
 			$result = $this->_repair_table($sql, $db_error);
 		}
@@ -330,10 +338,10 @@ class yf_db {
 		if (empty($db_error) || empty($db_error['message'])) {
 			$db_error = $old_db_error;
 		}
-		$msg = 'DB: QUERY ERROR: '.$sql.'<br />'.PHP_EOL.'<b>CAUSE</b>: '.$db_error['message']
+		$msg = 'DB: QUERY ERROR: '.$sql. ';'. PHP_EOL. 'CAUSE: '.$db_error['message']
 			. ($db_error['code'] ? ' (code:'.$db_error['code'].')' : '')
 			. ($db_error['offset'] ? ' (offset:'.$db_error['offset'].')' : '')
-			. (main()->USE_CUSTOM_ERRORS ? '' : $_trace.'<br />'.PHP_EOL)
+			. (main()->USE_CUSTOM_ERRORS ? '' : $_trace. PHP_EOL)
 		;
 		trigger_error($msg, E_USER_WARNING);
 	}
@@ -609,24 +617,26 @@ class yf_db {
 		if (!$this->_connected && !$this->connect()) {
 			return false;
 		}
-		$CACHE_CONTAINER = &$this->_db_results_cache;
-		if ($use_cache && $this->ALLOW_CACHE_QUERIES && isset($CACHE_CONTAINER[$query])) {
-			return $CACHE_CONTAINER[$query];
+		$storage = &$this->_db_results_cache;
+		if ($use_cache && $this->ALLOW_CACHE_QUERIES && isset($storage[$query])) {
+			return $storage[$query];
 		}
-		$Q = $this->query($query);
-		if ($assoc) {
-			$data = $this->db->fetch_assoc($Q);
-		} else {
-			$data = $this->db->fetch_row($Q);
+		$q = $this->query($query);
+		if ($q) {
+			if ($assoc) {
+				$data = @$this->db->fetch_assoc($q);
+			} else {
+				$data = @$this->db->fetch_row($q);
+			}
 		}
-		$this->free_result($Q);
+		$this->free_result($q);
 		// Store result in variable cache
-		if ($use_cache && $this->ALLOW_CACHE_QUERIES && !isset($CACHE_CONTAINER[$query])) {
-			$CACHE_CONTAINER[$query] = $data;
+		if ($use_cache && $this->ALLOW_CACHE_QUERIES && !isset($storage[$query])) {
+			$storage[$query] = $data;
 			// Permanently turn off queries cache (and free some memory) if case of limit reached
-			if ($this->CACHE_QUERIES_LIMIT && count($CACHE_CONTAINER) > $this->CACHE_QUERIES_LIMIT) {
-				$this->ALLOW_CACHE_QUERIES	= false;
-				$CACHE_CONTAINER			= null;
+			if ($this->CACHE_QUERIES_LIMIT && count($storage) > $this->CACHE_QUERIES_LIMIT) {
+				$this->ALLOW_CACHE_QUERIES = false;
+				$storage = null;
 			}
 		}
 		return $data;
@@ -741,30 +751,32 @@ class yf_db {
 		if (!$this->_connected && !$this->connect()) {
 			return false;
 		}
-		$CACHE_CONTAINER = &$this->_db_results_cache;
-		if ($use_cache && $this->ALLOW_CACHE_QUERIES && isset($CACHE_CONTAINER[$query])) {
-			return $CACHE_CONTAINER[$query];
+		$storage = &$this->_db_results_cache;
+		if ($use_cache && $this->ALLOW_CACHE_QUERIES && isset($storage[$query])) {
+			return $storage[$query];
 		}
 		$data = null;
-		$Q = $this->query($query);
-		// If $key_name is specified - then save to $data using it as key
-		while ($A = $this->db->fetch_assoc($Q)) {
-			if ($key_name != null && $key_name != '-1') {
-				$data[$A[$key_name]] = $A;
-			} elseif (isset($A['id']) && $key_name != '-1') {
-				$data[$A['id']] = $A;
-			} else {
-				$data[] = $A;
+		$q = $this->query($query);
+		if ($q) {
+			// If $key_name is specified - then save to $data using it as key
+			while ($a = @$this->db->fetch_assoc($q)) {
+				if ($key_name != null && $key_name != '-1') {
+					$data[$a[$key_name]] = $a;
+				} elseif (isset($a['id']) && $key_name != '-1') {
+					$data[$a['id']] = $a;
+				} else {
+					$data[] = $a;
+				}
 			}
+			@$this->free_result($q);
 		}
-		$this->free_result($Q);
 		// Store result in variable cache
-		if ($use_cache && $this->ALLOW_CACHE_QUERIES && !isset($CACHE_CONTAINER[$query])) {
-			$CACHE_CONTAINER[$query] = $data;
+		if ($use_cache && $this->ALLOW_CACHE_QUERIES && !isset($storage[$query])) {
+			$storage[$query] = $data;
 			// Permanently turn off queries cache (and free some memory) if case of limit reached
-			if ($this->CACHE_QUERIES_LIMIT && count($CACHE_CONTAINER) > $this->CACHE_QUERIES_LIMIT) {
-				$this->ALLOW_CACHE_QUERIES	= false;
-				$CACHE_CONTAINER			= null;
+			if ($this->CACHE_QUERIES_LIMIT && count($storage) > $this->CACHE_QUERIES_LIMIT) {
+				$this->ALLOW_CACHE_QUERIES = false;
+				$storage = null;
 			}
 		}
 		return $data;
@@ -1193,16 +1205,6 @@ class yf_db {
 		if ($this->DB_PREFIX && substr($name, 0, strlen($this->DB_PREFIX)) == $this->DB_PREFIX) {
 			$name_wo_db_prefix = substr($name, strlen($this->DB_PREFIX));
 		}
-/*
-// TODO: implement overrides here
-			// If non-empty - apply override of table names (useful for pre-release or development on same database as production)
-			if (isset($GLOBALS['_OVERRIDES']['DB_TABLE_NAMES'][$this->DB_NAME])) {
-				$override_table_names = $GLOBALS['_OVERRIDES']['DB_TABLE_NAMES'][$this->DB_NAME];
-				foreach ((array)$override_table_names as $cur_name => $use_name) {
-					$this->_PARSED_TABLES[$cur_name] = $use_name;
-				}
-			}
-*/
 		return $this->DB_PREFIX. (in_array($name_wo_db_prefix, $this->_need_sys_prefix) ? 'sys_' : ''). $name_wo_db_prefix;
 	}
 
@@ -1313,21 +1315,34 @@ class yf_db {
 	/**
 	* Helper
 	*/
-	function delete($table, $where) {
+	function delete($table, $where, $as_sql = false) {
 		// Do not allow wide deletes, to prevent awful mistakes, use plain db()->query('DELETE ...') instead
 		if (!$where) {
 			return false;
 		}
-		$cond = 'id='.$this->escape_val($where);
-// TODO: add support for several fields in where
-		if (is_array($where)) {
-			$cond = key($where).'='.$this->escape_val(current($where));
+		$where_func = 'where';
+		if (is_numeric($where)) {
+			$where_func = 'whereid';
+		} elseif (is_array($where)) {
+			$is_all_numeric = true;
+			foreach ($where as $k => $v) {
+				if (!is_numeric($k) || !is_numeric($v)) {
+					$is_all_numeric = false;
+					break;
+				}
+			}
+			if ($is_all_numeric) {
+				$where_func = 'whereid';
+			}
 		}
-		if (MAIN_TYPE_ADMIN && $this->QUERY_REVISIONS) {
+		$sql = $this->from($table)->$where_func($where)->delete($_as_sql = true);
+		if (false === strpos(strtoupper($sql), 'WHERE')) {
+			return false;
+		}
+		if (MAIN_TYPE_ADMIN && $this->QUERY_REVISIONS && !$as_sql) {
 			$this->_save_query_revision(__FUNCTION__, $table, array('where' => $where, 'cond' => $cond));
 		}
-		$sql = 'DELETE FROM '.$this->_real_name($table).' WHERE '.$cond.' LIMIT 1';
-		return $this->query($sql);
+		return $as_sql ? $sql : $this->query($sql);
 	}
 
 	/**
@@ -1428,21 +1443,50 @@ class yf_db {
 
 	/**
 	*/
-	function query_builder() {
-		return _class('db_query_builder', 'classes/db/');
+	function utils() {
+		if (strpos($this->DB_TYPE, 'mysql') !== false) {
+			$driver = 'mysql';
+		} else {
+			$driver = $this->DB_TYPE;
+		}
+		$cname = 'db_utils_'.$driver;
+		$obj = clone _class($cname, 'classes/db/');
+		$obj->db = $this;
+		return $obj;
 	}
 
 	/**
 	*/
 	function split_sql(&$ret, $sql) {
-		return _class('db_utils', 'classes/db/')->split_sql($ret, $sql);
+		return $this->utils()->split_sql($ret, $sql);
 	}
 
 	/**
-	* I plan to start query builder qurying from this shortcut
 	*/
-	function select($sql = array()) {
-		return _class('db_query_builder', 'classes/db/')->select($sql);
+	function query_builder() {
+		if (strpos($this->DB_TYPE, 'mysql') !== false) {
+			$driver = 'mysql';
+		} else {
+			$driver = $this->DB_TYPE;
+		}
+		$cname = 'db_query_builder_'.$driver;
+		$obj = clone _class($cname, 'classes/db/');
+		$obj->db = $this;
+		return $obj;
+	}
+
+	/**
+	* Query builder shortcut
+	*/
+	function select() {
+		return $this->query_builder()->select(array('__args__' => func_get_args()));
+	}
+
+	/**
+	* Query builder shortcut
+	*/
+	function from() {
+		return $this->query_builder()->from(array('__args__' => func_get_args()));
 	}
 
 	/**
@@ -1456,13 +1500,11 @@ class yf_db {
 			'get_id'		=> $_GET['id'],
 			'trace'			=> $trace,
 		);
-// TODO: data_old usign SELECT by $where
-// TODO: data_diff = diff data_new vs data_old
 		$to_insert = array(
 			'date'			=> date('Y-m-d H:i:s'),
 			'data_new'		=> $params['data'] ? json_encode($params['data']) : '',
-#			'data_old'		=> 
-#			'data_diff'		=> 
+			'data_old'		=> $params['data_old'],
+			'data_diff'		=> $params['data_diff'],
 			'user_id'		=> main()->ADMIN_ID,
 			'user_group'	=> main()->ADMIN_GROUP,
 			'site_id'		=> conf('SITE_ID'),
@@ -1475,29 +1517,6 @@ class yf_db {
 		);
 		$sql = $this->insert_safe('sys_db_revisions', $to_insert, $only_sql = true);
 		$this->_add_shutdown_query($sql);
-	}
-
-	/**
-	* !!! DEPRECATED !!! and should not be used from now on.
-	*/
-	function _parse_tables() {
-		if ($this->_already_parsed_tables) {
-			return true;
-		}
-		if (!is_object($this->db)) {
-			$this->connect();
-		}
-		if (empty($included)) {
-			$tmp_tables = $this->meta_tables();
-			// Clean up tables from system prefixes
-			$this->_PARSED_TABLES = array();
-			foreach ((array)$tmp_tables as $table_name) {
-				$short_name = substr(str_replace('sys_','',$table_name), strlen($this->DB_PREFIX));
-				$this->_PARSED_TABLES[$short_name] = $table_name;
-			}
-			ksort($this->_PARSED_TABLES);
-		}
-		$this->_already_parsed_tables = true;
 	}
 
 	/**

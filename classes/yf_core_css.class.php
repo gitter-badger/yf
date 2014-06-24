@@ -7,13 +7,21 @@ class yf_core_css {
 	public $content = array();
 	/** @array List of pre-defined assets */
 	public $assets = array(
-// TODO: add support for sub-arrays and params
 		'jquery-ui'	=> '//cdnjs.cloudflare.com/ajax/libs/jqueryui/1.10.4/css/jquery-ui.min.css',
 		'angular-ui'=> '//cdnjs.cloudflare.com/ajax/libs/angular-ui/0.4.0/angular-ui.min.css',
 		'bs2'		=> '//netdna.bootstrapcdn.com/twitter-bootstrap/2.3.2/css/bootstrap-combined.min.css',
 		'bs3'		=> '//netdna.bootstrapcdn.com/bootstrap/3.1.0/css/bootstrap.min.css',
 	);
 
+	/**
+	* Catch missing method call
+	*/
+	function __call($name, $args) {
+		return main()->extend_call($this, $name, $args);
+	}
+
+	/**
+	*/
 	public function _init() {
 		// Main CSS from theme stpl
 		$main_style_css = trim(tpl()->parse_if_exists('style_css'));
@@ -93,6 +101,11 @@ class yf_core_css {
 		if (!file_exists($packed_dir)) {
 			mkdir($packed_dir, 0755, true);
 		}
+		_class('core_errors')->fire('css.before_pack', array(
+			'fiie'		=> $packed_file,
+			'content'	=> $this->content,
+			'params'	=> $params,
+		));
 		$out = array();
 		foreach ((array)$this->content as $md5 => $v) {
 			$type = $v['type'];
@@ -110,6 +123,12 @@ class yf_core_css {
 		}
 // TODO: in DEBUG_MODE add comments into generated file and change its name to not overlap with production one
 		file_put_contents($packed_file, implode(PHP_EOL, $out));
+
+		_class('core_errors')->fire('css.after_pack', array(
+			'fiie'		=> $packed_file,
+			'content'	=> $out,
+			'params'	=> $params,
+		));
 		return $packed_file;
 	}
 
@@ -177,7 +196,15 @@ class yf_core_css {
 					'params'=> $params,
 				);
 			} elseif ($type == 'asset') {
-				$url = $this->assets[$_content];
+				$info = $this->assets[$_content];
+				if (is_array($info)) {
+					$url = $info['url'];
+					if ($info['require']) {
+						$this->add($info['require'], 'asset');
+					}
+				} else {
+					$url = $info;
+				}
 				$md5 = md5($url);
 				$this->content[$md5] = array(
 					'type'	=> 'url',
@@ -196,6 +223,7 @@ class yf_core_css {
 				));
 			}
 		}
+#		return $this; // Chaining
 	}
 
 	/**
@@ -220,6 +248,12 @@ class yf_core_css {
 	*/
 	public function add_raw($content, $params = array()) {
 		return $this->add($content, 'raw', $params);
+	}
+
+	/**
+	*/
+	public function add_asset($content, $params = array()) {
+		return $this->add($content, 'asset', $params);
 	}
 
 	/**
@@ -256,14 +290,10 @@ class yf_core_css {
 	public function _detect_content($content = '') {
 		$content = trim($content);
 		$type = false;
-// TODO: domain.com/style.css
-// TODO: /style.css
-// TODO: style.css
 		if (isset($this->assets[$content])) {
 			$type = 'asset';
 		} elseif (preg_match('~^(http://|https://|//)[a-z0-9]+~ims', $content)) {
 			$type = 'url';
-// TODO: file allowed to begin with PROJECT_PATH, SITE_PATH or YF_PATH
 		} elseif (preg_match('~^/[a-z0-9\./_-]+\.css$~ims', $content) && file_exists($content)) {
 			$type = 'file';
 		} elseif (preg_match('~^(<style|[$;#\.@/\*])~ims', $content) || strpos($content, PHP_EOL) !== false) {
@@ -275,7 +305,12 @@ class yf_core_css {
 	/**
 	*/
 	public function _strip_style_tags ($text) {
+/*
 // TODO: add support for extracting url from <link rel="stylesheet" href="path.to/style.css">
+//		preg_replace_callback('~<link[\s\t]+rel="stylesheet"[\s\t]+href="([^"]+)"[\s\t]*[/]?>~ims', function($m) use (&$text) {
+//			return $m[1];
+//		});
+*/
 		for ($i = 0; $i < 10; $i++) {
 			if (strpos($text, 'style') === false) {
 				break;

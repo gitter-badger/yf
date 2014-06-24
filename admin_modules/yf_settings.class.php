@@ -61,10 +61,14 @@ class yf_settings {
 			$to_save = $this->_prepare_to_save($_POST);
 			if ($to_save) {
 				$saved_settings_content = '<'.'?php'.PHP_EOL.implode(PHP_EOL, $to_save).PHP_EOL;
-				$saved_settings_file = PROJECT_PATH.'saved_settings.php';
+				if (defined('CONFIG_PATH') && file_exists(CONFIG_PATH)) {
+					$saved_settings_file = CONFIG_PATH.'saved_settings.php';
+				} else {
+					$saved_settings_file = PROJECT_PATH.'saved_settings.php';
+				}
 				common()->message_info('Saved settings file contents ('.$saved_settings_file.') <pre>'.str_replace('_', '&#95;', _prepare_html($saved_settings_content)).'</pre>');
 				file_put_contents($saved_settings_file, $saved_settings_content);
-				return js_redirect('./?object='.$_GET['object']);
+				return js_redirect(url_admin('/@object'));
 			}
 		}
 		$a = array(
@@ -116,7 +120,7 @@ class yf_settings {
 	*/
 	function cache_purge() {
 		$result = _class('cache')->_clear_all();
-		return js_redirect('./?object='.$_GET['object']);
+		return js_redirect(url_admin('/@object'));
 	}
 
 	/**
@@ -206,7 +210,7 @@ $container_html .= '
     </ul>
 </div>
 			';
-		$a['back_link'] = './?object='.$_GET['object'];
+		$a['back_link'] = url_admin('/@object');
 		return form($a, array('legend' => 'Settings items'))
 			->hidden('sort')
 			->container($container_html, array('wide' => 1))
@@ -378,7 +382,7 @@ $(function() {
 			return false;
 		}
 		$items = array();
-		$url = process_url('./?object='.$_GET['object']);
+		$url = process_url(url_admin('/@object'));
 		foreach ((array)$this->_used_modules as $module_name) {
 			$items[] = '<li><a href="'.$url.'#module_'.$module_name.'"><i class="icon-chevron-right"></i> '.t($module_name).'</a></li>';
 		}

@@ -49,9 +49,8 @@ class yf_ssh {
 	/**
 	* Catch missing method call
 	*/
-	function __call($name, $arguments) {
-		trigger_error(__CLASS__.': No method '.$name, E_USER_WARNING);
-		return false;
+	function __call($name, $args) {
+		return main()->extend_call($this, $name, $args);
 	}
 
 	/**
@@ -71,9 +70,8 @@ class yf_ssh {
 		} else {
 			$this->_INIT_OK = true;
 		}
-
 		if ($this->_INIT_OK && $this->DRIVER == 'phpseclib') {
-			set_include_path (YF_PATH.'libs/phpseclib/'. PATH_SEPARATOR. get_include_path());
+			set_include_path (YF_PATH.'libs/phpseclib/phpseclib/'. PATH_SEPARATOR. get_include_path());
 			require_once('Crypt/RSA.php');
 			require_once('Net/SSH2.php');
 		}

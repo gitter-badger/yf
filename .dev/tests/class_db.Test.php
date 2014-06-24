@@ -18,6 +18,14 @@ class class_db_test extends PHPUnit_Framework_TestCase {
 		'total_sum'	=> '19,12',
 		'name'		=> 'name\'',
 	);
+	public static $_er = array();
+	public static function setUpBeforeClass() {
+		self::$_er = error_reporting();
+		error_reporting(0);
+	}
+	public static function tearDownAfterClass() {
+		error_reporting(self::$_er);
+	}
 	private function db() {
 		return _class('db');
 	}
@@ -75,6 +83,15 @@ class class_db_test extends PHPUnit_Framework_TestCase {
 	public function test_update_safe() {
 		$sql = self::db()->update_safe('shop_orders', $this->data_not_safe, 'id=1', $only_sql = true);
 		$this->assertEquals( 'UPDATE `t_shop_orders` SET `user_id` = \'1\', `date` = \'1234567890\', `total_sum` = \'19,12\', `name` = \'name\\\'\' WHERE id=1', str_replace(PHP_EOL, '', $sql) );
+	}
+	public function test_delete() {
+		$this->assertFalse(self::db()->delete('table', '', $as_sql = true));
+		$this->assertEquals( 'DELETE FROM `t_table` WHERE `id` = \'1\'', self::db()->delete('table', 1, $as_sql = true));
+		$this->assertEquals( 'DELETE FROM `t_table` WHERE `id` = \'1\'', self::db()->delete('table', 'id=1', $as_sql = true));
+		$this->assertEquals( 'DELETE FROM `t_table` WHERE `id` = \'1\'', self::db()->delete('table', 'id = 1', $as_sql = true));
+		$this->assertEquals( 'DELETE FROM `t_table` WHERE `id` > \'1\'', self::db()->delete('table', 'id > 1', $as_sql = true));
+		$this->assertEquals( 'DELETE FROM `t_table` WHERE `id` IN(1,2,3,4)', self::db()->delete('table', array(1,2,3,4), $as_sql = true));
+#		$this->assertEquals( '', self::db()->delete('table', 'id between 1 and 5', $as_sql = true));
 	}
 	public function test_es() {
 		$this->assertEquals( '', self::db()->es(false));

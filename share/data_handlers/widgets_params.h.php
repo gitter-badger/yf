@@ -1,5 +1,6 @@
 <?php
 
+$data = array();
 $_user_modules_methods = _class('user_modules', 'admin_modules/')->_get_methods(array('private' => '1'));
 foreach ((array)$_user_modules_methods as $module_name => $module_methods) {
 	foreach ((array)$module_methods as $method_name) {
@@ -9,3 +10,4 @@ foreach ((array)$_user_modules_methods as $module_name => $module_methods) {
 		$data[$module_name][$method_name] = _class($module_name, 'modules/')->$method_name(array('describe' => '1'));
 	}
 }
+return $data;

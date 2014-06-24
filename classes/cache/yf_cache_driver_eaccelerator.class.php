@@ -1,20 +1,54 @@
 <?php
 
-load('cache_driver', 'framework', 'classes/session/');
+load('cache_driver', 'framework', 'classes/cache/');
 class yf_cache_driver_eaccelerator extends yf_cache_driver {
-// TODO
+
+	/**
+	*/
+	function is_ready() {
+		return function_exists('eaccelerator_get');
+	}
+
+	/**
+	*/
 	function get($name, $ttl = 0, $params = array()) {
+		if (!$this->is_ready()) {
+			return null;
+		}
+		$result = eaccelerator_get($name);
+		if (is_string($result)) {
+			$try_unpack = unserialize($result);
+			if ($try_unpack || substr($result, 0, 2) == 'a:') {
+				$result = $try_unpack;
+			}
+		}
+		return $result;
 	}
+
+	/**
+	*/
 	function set($name, $data, $ttl = 0) {
+		if (!$this->is_ready()) {
+			return null;
+		}
+		return eaccelerator_put($name, $data, $ttl);
 	}
+
+	/**
+	*/
 	function del($name) {
+		if (!$this->is_ready()) {
+			return null;
+		}
+		return eaccelerator_rm($key_name_ns);
 	}
-	function multi_get(array $names, $ttl = 0, $params = array()) {
-	}
-	function multi_set(array $data, $ttl = 0) {
-	}
-	function multi_del(array $names) {
-	}
-	function clean($name) {
+
+	/**
+	*/
+	function flush() {
+		if (!$this->is_ready()) {
+			return null;
+		}
+		return eaccelerator_clear();
 	}
 }

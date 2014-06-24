@@ -13,7 +13,7 @@ class yf_form2_stars {
 			$extra = array();
 		}
 		$extra['name'] = $extra['name'] ?: ($name ?: 'stars');
-		$extra['desc'] = $extra['desc'] ?: ($desc ?: ucfirst(str_replace('_', ' ', $extra['name'])));
+		$extra['desc'] = $__this->_prepare_desc($extra, $desc);
 		$func = function($extra, $r, $_this) {
 			$extra['id'] = $extra['name'];
 			$color_ok = $extra['color_ok'] ?: 'yellow';
@@ -56,8 +56,9 @@ class yf_form2_stars {
 			$extra = array();
 		}
 		$extra['name'] = $extra['name'] ?: ($name ?: 'stars');
-		$extra['desc'] = $extra['desc'] ?: ($desc ?: ucfirst(str_replace('_', ' ', $extra['name'])));
+		$extra['desc'] = $__this->_prepare_desc($extra, $desc);
 		$func = function($extra, $r, $_this) {
+			$_this->_prepare_inline_error($extra);
 			$max = $extra['max'] ?: 5;
 			$stars = $extra['stars'] ?: 5;
 			$class = $extra['class'] ?: 'star';
@@ -68,7 +69,7 @@ class yf_form2_stars {
 			$body[] = '</span>';
 			$body[] = '<input type="hidden" name="'.$extra['name'].'" id='.$extra['name'].' value="0">';
 			
-			require_js('<script type="text/javascript">
+			js('<script type="text/javascript">
 				$(function () {
 					$(".'.$class.'.'.$extra['name'].'").on("click",function() {
 						var value = $(this).attr("data-value");

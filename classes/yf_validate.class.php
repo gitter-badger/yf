@@ -35,6 +35,13 @@ class yf_validate {
 		# $extra['title'] is used in html5 validation suggesting messages
 */
 
+	/**
+	* Catch missing method call
+	*/
+	function __call($name, $args) {
+		return main()->extend_call($this, $name, $args);
+	}
+
 	/***/
 	function _init() {
 		$this->MB_ENABLED = _class('utf8')->MULTIBYTE;
@@ -158,6 +165,10 @@ class yf_validate {
 
 		$out = array();
 		foreach ((array)$validate_rules as $name => $raw) {
+			$is_html_array = (false !== strpos($name, '['));
+			if ($is_html_array) {
+				$name = str_replace(array('[',']'), array('.',''), trim($name,']['));
+			}
 			$rules = (array)$this->_validate_rules_array_from_raw($raw);
 			if ($all_before) {
 				$tmp = $all_before;
@@ -338,8 +349,8 @@ class yf_validate {
 		if (!$param) {
 			return false;
 		}
-		if (isset($params['format']) && $format = $this->getDateFormat($params['format'])) {
-			return DateTime::createFromFormat($format, $in) > DateTime::createFromFormat($format, $param);
+		if (isset($params['format'])) {
+			return DateTime::createFromFormat($params['format'], $in) > DateTime::createFromFormat($params['format'], $param);
 		}
 		$date = strtotime($param);
 		if ( ! $date) {
@@ -358,8 +369,8 @@ class yf_validate {
 		if (!$param) {
 			return false;
 		}
-		if (isset($params['format']) && $format = $this->getDateFormat($params['format'])) {
-			return DateTime::createFromFormat($format, $in) < DateTime::createFromFormat($format, $param);
+		if (isset($params['format'])) {
+			return DateTime::createFromFormat($params['format'], $in) < DateTime::createFromFormat($params['format'], $param);
 		}
 		$date = strtotime($param);
 		if ( ! $date) {

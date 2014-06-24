@@ -25,6 +25,13 @@ class yf_cats {
 	public $BOX_LEVEL_MARKER	= '&#0124;-- ';
 
 	/**
+	* Catch missing method call
+	*/
+	function __call($name, $args) {
+		return main()->extend_call($this, $name, $args);
+	}
+
+	/**
 	*/
 	function _init () {
 		$this->_category_sets = main()->get_data('category_sets');
@@ -42,7 +49,8 @@ class yf_cats {
 		if (empty($cat_id)) {
 			return false;
 		}
-		if (!isset($this->_items_cache[$cat_id])) {
+		$cache_name = intval($cat_id).'_'.intval($all);
+		if (!isset($this->_items_cache[$cache_name])) {
 			$cat_id = $this->_get_cat_id_by_name($cat_name);
 			$custom_fields = array();
 			if ($cat_id) {
@@ -61,7 +69,7 @@ class yf_cats {
 				// Try to parse 'dynamic' attributes for the item
 				if ($this->USE_DYNAMIC_ATTS && $custom_fields) {
 					if ($a['other_info']) {
-						$custom_attrs = (array)$this->_convert_atts_string_into_array($a['other_info']);
+						$custom_attrs = (array)_attrs_string2array($a['other_info']);
 					}
 					foreach ((array)$custom_fields as $f) {
 						$a[$f] = isset($custom_attrs[$f]) ? (string)$custom_attrs[$f]: '';
@@ -69,9 +77,9 @@ class yf_cats {
 				}
 				$raw_items[$a['id']] = $a;
 			}
-			$this->_items_cache[$cat_id] = $raw_items;
+			$this->_items_cache[$cache_name] = $raw_items;
 		} else {
-			$raw_items = $this->_items_cache[$cat_id];
+			$raw_items = $this->_items_cache[$cache_name];
 		}
 		if ($recursive_sort && !empty($raw_items)) {
 			$raw_items = $this->_recursive_sort_items($raw_items);
@@ -127,27 +135,11 @@ class yf_cats {
 	}
 
 	/**
-	* Convert string attributes (from field 'other_info') into array
-	*/
-	function _convert_atts_string_into_array($string = '') {
-		$output_array = array();
-		foreach (explode(';', trim($string)) as $tmp_string) {
-			list($try_key, $try_value) = explode('=', trim($tmp_string));
-			$try_key	= trim(trim(trim($try_key), '"'));
-			$try_value	= trim(trim(trim($try_value), '"'));
-			if (strlen($try_key) && strlen($try_value)) {
-				$output_array[$try_key] = $try_value;
-			}
-		}
-		return $output_array;
-	}
-
-	/**
 	* Get all category items names for the given block
 	*/
-	function _get_items_names($cat_name = '') {
+	function _get_items_names($cat_name = '', $recursive_sort = true, $all = false) {
 		$items = array();
-		foreach ((array)$this->_get_items_array($cat_name) as $item_id => $item_info) {
+		foreach ((array)$this->_get_items_array($cat_name, $recursive_sort, $all) as $item_id => $item_info) {
 			$items[$item_info['id']] = $item_info['name'];
 		}
 		return $items;
@@ -155,39 +147,44 @@ class yf_cats {
 
 	/**
 	*/
-	function _get_items_names_cached($cat_name = '') {
-		$cache_name = 'cats__get_items_names__'.$cat_name;
+	function _get_items_names_cached($cat_name = '', $recursive_sort = true, $all = false) {
+		$cache_name = 'cats__get_items_names__'.$cat_name.'_'.intval($all).'_'.intval($recursive_sort);
 		$items = cache_get($cache_name);
 		if ($items) {
 			return $items;
 		}
-		$items = $this->_get_items_names($cat_name);
+		$items = $this->_get_items_names($cat_name, $recursive_sort, $all);
 		cache_set($cache_name, $items);
 		return $items;
 	}
 
 	/**
 	*/
-	function _prepare_for_box_cached($cat_name = '', $with_all = 1, $parent_item_id = 0) {
-		$cache_name = 'cats__prepare_for_box__'.$cat_name.'_'.$with_all.'_'.$parent_item_id;
+	function _prepare_for_box_cached($cat_name = '', $with_all = 1, $parent_item_id = 0, $all = false) {
+		$cache_name = 'cats__prepare_for_box__'.$cat_name.'_'.intval($all).'_'.intval($parent_item_id);
 		$items = cache_get($cache_name);
 		if ($items) {
 			return $items;
 		}
-		$items = $this->_prepare_for_box($cat_name, $with_all, $parent_item_id);
+		$items = $this->_prepare_for_box($cat_name, $with_all, $parent_item_id, $all);
 		cache_set($cache_name, $items);
+		if (!$with_all) {
+			unset($items[' ']);
+		} elseif (!isset($items[' '])) {
+			$items = array(' ' => t('-- All --')) + $items;
+		}
 		return $items;
 	}
 
 	/**
 	* Prepare category items for use in box
 	*/
-	function _prepare_for_box($cat_items = array(), $with_all = true, $parent_item_id = 0) {
+	function _prepare_for_box($cat_items = array(), $with_all = true, $parent_item_id = 0, $all = false) {
 		if (!empty($cat_items) && is_string($cat_items)) {
 			$cat_items = $this->_get_items_array($cat_items);
 		}
 		if (empty($cat_items)) {
-			$cat_items = $this->_get_items_array($this->_default_cats_block);
+			$cat_items = $this->_get_items_array($this->_default_cats_block, true, $all);
 		}
 		$items_for_box = array();
 		if ($with_all) {
@@ -351,7 +348,7 @@ class yf_cats {
 			}
 			$sub_children = array();
 			if ($get_sub_children) {
-				$sub_children = $this->$cur_func_name($cur_item_info['id'], $cat_items, $get_sub_children);
+				$sub_children = $this->$cur_func_name($cur_item_info['id'], $cat_items, $get_sub_children, $return_array);
 			}
 			if ($return_array) {
 				$children_ids[$cur_item_info['id']] = $cur_item_info['id'];
@@ -373,7 +370,8 @@ class yf_cats {
 		if (empty($cat_id) || empty($item_id)) {
 			return false;
 		}
-		return $this->_items_cache[$cat_id][$item_id]['name'];
+		$items = $this->_get_items_names_cached($cat_name, $recursive_sort = true, $all = false);
+		return $items[$item_id];
 	}
 
 	/**
@@ -392,11 +390,34 @@ class yf_cats {
 		}
 		$current_func = __FUNCTION__;
 		$ids[$cat_id] = $cat_id;
-		foreach ($all_cats as $key => $item) {
+		foreach ((array)$all_cats as $key => $item) {
 			if ($item['parent_id'] == $cat_id) {
 				$ids += $this->$current_func($item['id'], $all_cats);
 			}
 		}
 		return $ids;
+	}
+
+	/**
+	*/
+	function _get_all_parents_tree($cat_name, $recursive_sort = true, $all_records = false) {
+		$cats_parents = array();
+		foreach ((array)$this->_get_items_array($cat_name, $recursive_sort, $all_records) as $cid => $a) {
+			$cats_parents[$cid] = $a['parent_id'];
+		}
+		$tree = array();
+		foreach ((array)$cats_parents as $cid => $parent_id) {
+			$parents = array();
+			$parents[$cid] = $cid;
+			do {
+				$parents[$parent_id] = $parent_id;
+			} while ($parent_id = $cats_parents[$parent_id]);
+
+			if (isset($parents[0])) {
+				unset($parents[0]);
+			}
+			$tree[$cid] = $parents;
+		}
+		return $tree;
 	}
 }

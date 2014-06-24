@@ -63,12 +63,33 @@ if (!function_exists('tpl')) {
 if (!function_exists('common')) {
 	function common($silent = false) { return $GLOBALS['common'] ?: new my_missing_method_handler(__FUNCTION__, $silent); }
 }
+if (!function_exists('input')) {
+	function input($silent = false) { return _class('input') ?: new my_missing_method_handler(__FUNCTION__, $silent); }
+}
 // example: cache()->put()
 if (!function_exists('cache')) {
-	function cache($silent = false) { return $GLOBALS['sys_cache'] ?: new my_missing_method_handler(__FUNCTION__, $silent); }
+	function cache($silent = false) { return $GLOBALS['cache'] ?: new my_missing_method_handler(__FUNCTION__, $silent); }
+}
+if (!function_exists('cache_set')) {
+	function cache_set($name, $data, $ttl = 0) { return cache()->set($name, $data, $ttl); }
+}
+if (!function_exists('cache_get')) {
+	function cache_get($name) { return cache()->get($name); }
+}
+if (!function_exists('cache_del')) {
+	function cache_del($name) { return cache()->del($name); }
+}
+if (!function_exists('cache_tmp')) {
+	function cache_tmp() { static $cache; if (!isset($cache)) { $cache = clone _class('cache'); $cache->_init(array('driver' => 'tmp')); } return $cache; }
+}
+if (!function_exists('cache_files')) {
+	function cache_files() { static $cache; if (!isset($cache)) { $cache = clone _class('cache'); $cache->_init(array('driver' => 'files')); } return $cache; }
+}
+if (!function_exists('trace')) {
+	function trace() { $e = new Exception(); return implode(PHP_EOL, array_slice(explode(PHP_EOL, $e->getTraceAsString()), 1, -1)); }
 }
 // example: db()->query()
-// exampleof getting real table name: db('user') should return DB_PREFIX.'user' value;
+// example of getting real table name: db('user') should return DB_PREFIX.'user' value;
 if (!function_exists('db')) {
 	function db($tbl_name = '', $silent = false) {
 		if (!is_object($GLOBALS['db'])) {
@@ -87,13 +108,22 @@ if (!function_exists('t')) {
 	function t($string, $args = 0, $lang = '') { return _class('i18n')->translate_string($string, $args, $lang); }
 }
 if (!function_exists('url')) {
-	function url($params = array(), $host = '', $url_str = '') { return module('rewrite')->_force_get_url($params, $host, $url_str); }
+	function url($params = array(), $host = '', $url_str = '') { return _class('rewrite')->_url($params, $host, $url_str); }
+}
+if (!function_exists('url_user')) {
+	function url_user($params = array(), $host = '', $url_str = '') { return _class('rewrite')->_url_user($params, $host, $url_str); }
+}
+if (!function_exists('url_admin')) {
+	function url_admin($params = array(), $host = '', $url_str = '') { return _class('rewrite')->_url_admin($params, $host, $url_str); }
 }
 if (!function_exists('_force_get_url')) {
-	function _force_get_url($params = array(), $host = '', $url_str = '') { return module('rewrite')->_force_get_url($params, $host, $url_str); }
+	function _force_get_url($params = array(), $host = '', $url_str = '') { return _class('rewrite')->_force_get_url($params, $host, $url_str); }
 }
 if (!function_exists('_generate_url')) {
-	function _generate_url($params = array(), $host = '') { return module('rewrite')->_generate_url($params, $host); }
+	function _generate_url($params = array(), $host = '') { return _class('rewrite')->_generate_url($params, $host); }
+}
+if (!function_exists('process_url')) {
+	function process_url($url = '', $force_rewrite = false, $for_site_id = false) { return _class('rewrite')->_process_url($url, $force_rewrite, $for_site_id); }
 }
 if (!function_exists('form')) {
 	function form($replace = array(), $params = array()) { $form = clone _class('form2'); return $form->chained_wrapper($replace, $params); }
@@ -115,6 +145,9 @@ if (!function_exists('js')) {
 }
 if (!function_exists('require_js')) {
 	function require_js($content, $type = 'auto', $params = array()) { return _class('core_js')->add($content, $type, $params); }
+}
+if (!function_exists('jquery')) {
+	function jquery($content, $params = array()) { return _class('core_js')->jquery($content, $params); }
 }
 if (!function_exists('css')) {
 	function css($content, $type = 'auto', $params = array()) { return _class('core_css')->add($content, $type, $params); }
@@ -198,6 +231,9 @@ if (!function_exists('db_get')) {
 }
 if (!function_exists('db_get_all')) {
 	function db_get_all($sql = '', $key_name = null, $use_cache = true) { return db()->query_fetch_all($sql, $key_name, $use_cache); }
+}
+if (!function_exists('db_get_one')) {
+	function db_get_one($sql = '', $use_cache = true) { return db()->get_one($sql, $use_cache); }
 }
 // current GMT time
 if (!function_exists('gmtime')) {

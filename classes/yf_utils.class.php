@@ -3,6 +3,13 @@
 class yf_utils {
 
 	/**
+	* Catch missing method call
+	*/
+	function __call($name, $args) {
+		return main()->extend_call($this, $name, $args);
+	}
+
+	/**
 	* Encode given address to prevent spam-bots harvesting
 	*
 	*	Output: the email address as a mailto link, with each character
@@ -96,12 +103,7 @@ class yf_utils {
 
 	// Process URL (making rewrite if needed)
 	function process_url($url = '', $force_rewrite = false, $for_site_id = false) {
-		if (tpl()->REWRITE_MODE) {
-			module('rewrite')->_rewrite_replace_links($url, true, $force_rewrite, $for_site_id);
-		} elseif (substr($url, 0, 3) == './?') {
-			$url = WEB_PATH. substr($url, 2);
-		}
-		return $url;
+		return _class('rewrite')->_rewrite_replace_links($url, true, $force_rewrite, $for_site_id);
 	}
 
 	// Highlight given text (case-insensetive)
@@ -110,7 +112,7 @@ class yf_utils {
 			return $string;
 		}
 		$class = !empty($class) ? ' class="'.$class.'"' : '';
-		$search_words = preg_replace('/[^\d_!?-\p{L}]/imsu', ' ', $search_words);
+		$search_words = preg_replace('/[^\d_!?\p{L}-]/imsu', ' ', $search_words);
 		$search_words = explode(' ', $search_words);
 		$prepared = array();
 		foreach((array)$search_words as $item){
@@ -389,7 +391,13 @@ class yf_utils {
 		if (!strlen($html_text)) {
 			return '';
 		}
-		$translation_table = get_html_translation_table (HTML_SPECIALCHARS, ENT_QUOTES);
+		$translation_table = array(
+			'"' => '&quot;',
+			'&' => '&amp;',
+			'\'' => '&#039;',
+			'<' => '&lt;',
+			'>' => '&gt;',
+		);
 		// Change the ampersand to translate to itself, to avoid getting &amp;
 		$translation_table[ chr(38) ] = '&';
 		// Perform replacements
@@ -426,8 +434,7 @@ class yf_utils {
 	function printr($var, $do_not_echo = false) {
 		ob_start();
 		print_r($var);
-		$code =  htmlentities(ob_get_contents());
-		ob_clean();
+		$code =  htmlentities(ob_get_clean());
 		if (!$do_not_echo) {
 			echo '<pre>'.$code.'</pre>';
 		}

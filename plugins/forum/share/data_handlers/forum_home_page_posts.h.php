@@ -1,5 +1,6 @@
 <?php
 
+$data = array();
 $forums_array = main()->get_data('forum_forums');
 foreach ((array)$forums_array as $forum_info) {
 	if (empty($forum_info['last_post_id'])) {
@@ -27,3 +28,4 @@ if (!empty($_topics_ids)) {
 		$data[$_post_info['forum']]['total_posts'] = $topics_total_posts[$_post_info['topic']];
 	}
 }
+return $data;

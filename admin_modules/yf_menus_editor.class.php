@@ -16,8 +16,10 @@ class yf_menus_editor {
 	*/
 	function _init () {
 		$array_all = array('' => '-- ALL --');
-		$this->_groups['user'] = $array_all + (array)db()->get_2d('SELECT id,name FROM '.db('user_groups').' WHERE active="1"');
-		$this->_groups['admin'] = $array_all + (array)db()->get_2d('SELECT id,name FROM '.db('admin_groups').' WHERE active="1"');
+		$this->_groups = array(
+			'user'	=> $array_all + (array)db()->get_2d('SELECT id,name FROM '.db('user_groups').' WHERE active="1"'),
+			'admin'	=> $array_all + (array)db()->get_2d('SELECT id,name FROM '.db('admin_groups').' WHERE active="1"'),
+		);
 		$this->_sites = $array_all + (array)db()->get_2d('SELECT id,name FROM '.db('sites').' WHERE active="1"');
 		$this->_servers = $array_all + (array)db()->get_2d('SELECT id,name FROM '.db('core_servers').' WHERE active="1"');
 		$this->_menu_types = array(
@@ -72,10 +74,11 @@ class yf_menus_editor {
 				'name'	=> 'trim|required|is_unique[menus.name]',
 				'type'	=> 'trim|required',
 			))
-			->db_insert_if_ok('menus', array('type','name','desc','stpl_name','method_name','custom_fields','active'), array(), array('on_after_update' => function() {
+			->db_insert_if_ok('menus', array('type','name','desc','stpl_name','method_name','custom_fields','active'), array())
+			->on_after_update(function() {
 				common()->admin_wall_add(array('menu added: '.$_POST['name'].'', db()->insert_id()));
 				module('menus_editor')->_purge_caches();
-			}))
+			})
 			->radio_box('type', array('user' => 'User', 'admin' => 'Admin'))
 			->text('name')
 			->text('desc', 'Description')
@@ -94,15 +97,16 @@ class yf_menus_editor {
 			return _e('No id');
 		}
 		$a = db()->query_fetch('SELECT * FROM '.db('menus').' WHERE id='.intval($_GET['id']));
-		$a['redirect_link'] = './?object='.$_GET['object'];
+		$a['redirect_link'] = url_admin('/@object');
 		return form($a, array('autocomplete' => 'off'))
 			->validate(array(
 				'name'	=> 'trim|required',
 			))
-			->db_update_if_ok('menus', array('name','desc','stpl_name','method_name','custom_fields','active'), 'id='.$id, array('on_after_update' => function() {
+			->db_update_if_ok('menus', array('name','desc','stpl_name','method_name','custom_fields','active'), 'id='.$id)
+			->on_after_update(function() {
 				common()->admin_wall_add(array('menu updated: '.$_POST['name'].'', $menu_info['id']));
 				module('menus_editor')->_purge_caches();
-			}))
+			})
 			->info('type')
 			->text('name')
 			->text('desc', 'Description')
@@ -183,7 +187,7 @@ class yf_menus_editor {
 			main()->NO_GRAPHICS = true;
 			echo $_GET['id'];
 		} else {
-			return js_redirect('./?object='.$_GET['object']);
+			return js_redirect(url_admin('/@object'));
 		}
 	}
 
@@ -203,7 +207,7 @@ class yf_menus_editor {
 			main()->NO_GRAPHICS = true;
 			echo ($menu_info['active'] ? 0 : 1);
 		} else {
-			return js_redirect('./?object='.$_GET['object']);
+			return js_redirect(url_admin('/@object'));
 		}
 	}
 
@@ -276,7 +280,7 @@ class yf_menus_editor {
 		if (main()->is_post()) {
 			$old_info = $this->_auto_update_items_orders($menu_info['id']);
 			$batch = array();
-			foreach ((array)$_POST['items'] as $order_id => $info) {
+			foreach ((array)json_decode((string)$_POST['items'], $assoc = true) as $order_id => $info) {
 				$item_id = (int)$info['item_id'];
 				if (!$item_id || !isset($items[$item_id])) {
 					continue;
@@ -582,14 +586,11 @@ class yf_menus_editor {
 			->validate(array(
 				'name'	=> 'trim|required',
 			))
-			->db_insert_if_ok('menu_items', array(
-				'type_id','parent_id','name','location','icon','user_groups','site_ids','server_ids','active','other_info'
-			), array('menu_id' => $menu_info['id']), array(
-				'on_after_update' => function() {
-					common()->admin_wall_add(array('menu item added: '.$_POST['name'].'', db()->insert_id()));
-					module('menus_editor')->_purge_caches();
-				}
-			))
+			->db_insert_if_ok('menu_items', array('type_id','parent_id','name','location','icon','user_groups','site_ids','server_ids','active','other_info'), array('menu_id' => $menu_info['id']))
+			->on_after_update(function() {
+				common()->admin_wall_add(array('menu item added: '.$_POST['name'].'', db()->insert_id()));
+				module('menus_editor')->_purge_caches();
+			})
 			->select_box('type_id', $this->_item_types)
 			->select_box('parent_id', $this->_get_parents_for_select($menu_info['id']), array('desc' => 'Parent item'))
 			->text('name')
@@ -641,12 +642,11 @@ class yf_menus_editor {
 			))
 			->db_update_if_ok('menu_items', array(
 				'type_id','parent_id','name','location','icon','user_groups','site_ids','server_ids','active','other_info'
-			), 'id='.$item_info['id'], array(
-				'on_after_update' => function() {
-					common()->admin_wall_add(array('menu item updated: '.$_POST['name'].'', $item_info['id']));
-					module('menus_editor')->_purge_caches();
-				}
-			))
+			), 'id='.$item_info['id'])
+			->on_after_update(function() {
+				common()->admin_wall_add(array('menu item updated: '.$_POST['name'].'', $item_info['id']));
+				module('menus_editor')->_purge_caches();
+			})
 			->select_box('type_id', $this->_item_types)
 			->select_box('parent_id', $this->_get_parents_for_select($menu_info['id'], $item_info['id']), array('desc' => 'Parent item'))
 			->text('name')
@@ -763,7 +763,7 @@ class yf_menus_editor {
 		$EXPORTED_SQL = module('db_manager')->export($params);
 		$replace = array(
 			'sql_text'	=> _prepare_html($EXPORTED_SQL, 0),
-			'back_link'	=> './?object='.$_GET['object'],
+			'back_link'	=> url_admin('/@object'),
 		);
 		return tpl()->parse('db_manager/export_text_result', $replace);
 	}

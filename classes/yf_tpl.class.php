@@ -10,100 +10,72 @@
 class yf_tpl {
 
 	/** @var string @conf_skip Path to the templates (including current theme path) */
-	public $TPL_PATH			   = '';
+	public $TPL_PATH				= '';
 	/** @var bool Compressing output by cutting '\t','\r','\n','  ','   ' */
-	public $COMPRESS_OUTPUT		= false;
+	public $COMPRESS_OUTPUT			= false;
 	/** @var bool Using SEO - friendly URLs (All links need to be absolute) */
-	public $REWRITE_MODE		   = false;
+	public $REWRITE_MODE			= false;
 	/** @var bool Custom meta information (customizable for every page) : page titles, meta keywords, description */
-	public $CUSTOM_META_INFO	   = false;
+	public $CUSTOM_META_INFO		= false;
 	/** @var bool Exit after sending main content */
-	public $EXIT_AFTER_ECHO		= false;
+	public $EXIT_AFTER_ECHO			= false;
 	/** @var bool Use database to store templates */
-	public $GET_STPLS_FROM_DB	  = false;
+	public $GET_STPLS_FROM_DB		= false;
 	/** @var bool SECURITY: allow or not eval php code (with _PATTERN_INCLUDE) */
-	public $ALLOW_EVAL_PHP_CODE	= true;
-	/** @var array @conf_skip
-		For '_process_conditions',
-		Will be availiable in conditions with such form: {if('get.object' eq 'login_form')} Hello from login form {/if}
-	*/
-	public $_avail_arrays	  = array(
-		'get'	   => '_GET',
-		'post'	  => '_POST',
-	);
-	/** @var bool Get all templates from db or not (1 query or multiple)
-	*   (NOTE: If true - Slow PHP processing but just 1 db query)
-	*/
-	public $FROM_DB_GET_ALL		= false;
-	/** @var array @conf_skip Temporary storage for all templates parsed from db */
-	public $_TMP_FROM_DB	   = null;
-	/** @var array @conf_skip Array of output filters (will be called just before throwing output to user) */
-	public $_OUTPUT_FILTERS	= array();
+	public $ALLOW_EVAL_PHP_CODE		= true;
+	/** @var bool Get all templates from db or not (1 query or multiple)  (NOTE: If true - Slow PHP processing but just 1 db query) */
+	public $FROM_DB_GET_ALL			= false;
 	/** @var bool Catch any output before gzipped content (works only with GZIP) */
-	public $_OB_CATCH_CONTENT  = true;
+	public $OB_CATCH_CONTENT		= true;
 	/** @var bool Use or not Tidy to cleanup output */
-	public $TIDY_OUTPUT		= false;
-	/** @var array Configuration for Tidy */
-	public $_TIDY_CONFIG	   = array(
-		'alt-text'	  => '',
-		'output-xhtml'  => true,
-	);
+	public $TIDY_OUTPUT				= false;
 	/** @var bool Use backtrace to get STPLs source (where called from) FOR DEBUG_MODE ONLY ! */
-	public $USE_SOURCE_BACKTRACE	   = true;
+	public $USE_SOURCE_BACKTRACE	= true;
 	/** @var bool If available - use packed STPLs without checking if some exists in project */
-	public $AUTO_LOAD_PACKED_STPLS	 = false;
+	public $AUTO_LOAD_PACKED_STPLS	= false;
 	/** @var bool Allow custom filter for all parsed stpls */
 	public $ALLOW_CUSTOM_FILTER		= false;
 	/** @var bool Allow language-based special stpls */
-	public $ALLOW_LANG_BASED_STPLS	 = false;
+	public $ALLOW_LANG_BASED_STPLS	= false;
 	/** @var bool Allow inline debug */
-	public $ALLOW_INLINE_DEBUG		 = false;
+	public $ALLOW_INLINE_DEBUG		= false;
 	/** @var bool Allow skin inheritance (only one level used) */
-	public $ALLOW_SKIN_INHERITANCE	 = true;
+	public $ALLOW_SKIN_INHERITANCE	= true;
 	/** @var bool Allow to compile templates */
-	public $COMPILE_TEMPLATES		  = false;
-	/** @var bool Compile templates folder */
-	public $COMPILED_DIR			   = 'stpls_compiled/';
+	public $COMPILE_TEMPLATES		= false;
 	/** @var bool TTL for compiled stpls */
 	public $COMPILE_TTL				= 3600;
 	/** @var bool TTL for compiled stpls */
 	public $COMPILE_CHECK_STPL_CHANGED = false;
 	/** @var bool Allow pure php templates */
 	public $ALLOW_PHP_TEMPLATES		= false;
-	/** @var bool Use paths cache (check and save what stpl files we have and where) */
-	public $USE_PATHS_CACHE			= false;
 	/** @var bool */
 	public $DEBUG_STPL_VARS			= false;
+	/** @var bool Compile templates folder */
+	public $COMPILED_DIR			= 'stpls_compiled/';
 	/** @var string @conf_skip */
-	public $_STPL_EXT		  = '.stpl';
+	public $_STPL_EXT				= '.stpl';
 	/** @var string @conf_skip */
-	public $_THEMES_PATH	   = 'templates/';
+	public $_THEMES_PATH			= 'templates/';
 	/** @var string @conf_skip */
-	public $_IMAGES_PATH	   = 'images/';
+	public $_IMAGES_PATH			= 'images/';
 	/** @var string @conf_skip */
-	public $_UPLOADS_PATH	  = 'uploads/';
-	/** @var array Global scope tags (included in any parsed template) */
-	public $_global_tags	   = array();
-	/** @var STPL location codes (binary for less memory) */
-	public $_stpl_loc_codes = array(
-		'site'				=> 1,
-		'project'			=> 2,
-		'framework'			=> 4,
-		'framework_user'	=> 8,
-		'user_section'		=> 16,
-		'inherit_project'   => 32,
-		'lang_project'		=> 64,
-		'inherit_project2'	=> 128,
-	);
+	public $_UPLOADS_PATH			= 'uploads/';
 	/** @var string Current tempalte engine dirver to use */
-	public $DRIVER_NAME = 'yf';
+	public $DRIVER_NAME				= 'yf';
+	/** @var array Global scope tags (included in any parsed template) */
+	public $_global_tags			= array();
+	/** @var array @conf_skip  For '_process_conditions', Will be availiable in conditions with such form: {if('get.object' eq 'login_form')} Hello from login form {/if} */
+	public $_avail_arrays = array(
+		'get' => '_GET',
+		'post' => '_POST',
+	);
 
 	/**
 	* Catch missing method call
 	*/
-	function __call($name, $arguments) {
-		trigger_error(__CLASS__.': No method '.$name, E_USER_WARNING);
-		return false;
+	function __call($name, $args) {
+		return main()->extend_call($this, $name, $args);
 	}
 
 	/**
@@ -170,16 +142,26 @@ class yf_tpl {
 		}
 		$this->_init_global_tags();
 
-		if ($this->USE_PATHS_CACHE) {
-			$this->_prepare_paths_cache();
-		}
 		if (DEBUG_MODE) {
 			$this->register_output_filter(array($this, '_debug_mode_callback'), 'debug_mode');
 		}
 		if (main()->CONSOLE_MODE) {
-			$this->_OB_CATCH_CONTENT = false;
+			$this->OB_CATCH_CONTENT = false;
 		}
-		$this->driver = _class('tpl_driver_'.$this->DRIVER_NAME, 'classes/tpl/');
+		$this->_set_default_driver($this->DRIVER_NAME);
+	}
+
+	/**
+	*/
+	function _set_default_driver ($name = '') {
+		if (!$name) {
+			$name = $this->DRIVER_NAME;
+		}
+		if (!$name) {
+			$name = 'yf';
+		}
+		$this->DRIVER_NAME = $name;
+		$this->driver = _class('tpl_driver_'.$name, 'classes/tpl/');
 	}
 
 	/**
@@ -216,7 +198,7 @@ class yf_tpl {
 			_class('output_cache')->_process_output_cache();
 		}
 		if (!main()->NO_GRAPHICS) {
-			if ($this->_OB_CATCH_CONTENT) {
+			if ($this->OB_CATCH_CONTENT) {
 				ob_start();
 			}
 			// Trying to get default task
@@ -253,7 +235,12 @@ class yf_tpl {
 				conf('inline_js_edit', true);
 			}
 			if (!$skip_prefetch) {
-				$this->prefetch_center();
+				if (main()->CONSOLE_MODE) {
+					// Skip security checks for console mode
+					_class('core_blocks')->tasks(false);
+				} else {
+					_class('core_blocks')->prefetch_center();
+				}
 			}
 		}
 		if (!main()->NO_GRAPHICS) {
@@ -278,13 +265,12 @@ class yf_tpl {
 			$body['content'] = $this->_apply_output_filters($body['content']);
 
 			if (main()->OUTPUT_GZIP_COMPRESS && !conf('no_gzip')) {
-				if ($this->_OB_CATCH_CONTENT && ob_get_level()) {
-					$old_content = ob_get_contents();
-					ob_end_clean();
+				if ($this->OB_CATCH_CONTENT && ob_get_level()) {
+					$old_content = ob_get_clean();
 				}
 				ob_start('ob_gzhandler');
 				conf('GZIP_ENABLED', true);
-				if ($this->_OB_CATCH_CONTENT) {
+				if ($this->OB_CATCH_CONTENT) {
 					$body['content'] = $old_content.$body['content'];
 				}
 				// Count number of compressed bytes (not exactly accurate)
@@ -296,10 +282,7 @@ class yf_tpl {
 			if (main()->OUTPUT_CACHING && $init_type == 'user' && $_SERVER['REQUEST_METHOD'] == 'GET') {
 				_class('output_cache')->_put_page_to_output_cache($body);
 			}
-#			if (DEBUG_MODE || conf('exec_time')) {
-#				$body['exec_time'] = common()->_show_execution_time();
-#			}
-			if (DEBUG_MODE) {
+			if (DEBUG_MODE && !main()->CONSOLE_MODE && !main()->is_ajax()) {
 				$body['debug_info'] = common()->show_debug_info();
 				if ($this->ALLOW_INLINE_DEBUG || main()->INLINE_EDIT_LOCALE) {
 					$body['debug_info'] .= $this->parse('system/js_inline_editor');
@@ -317,13 +300,12 @@ class yf_tpl {
 			// Throw generated output to user
 			echo $output;
 		}
-		if (main()->NO_GRAPHICS && DEBUG_MODE && !conf('IS_AJAX')) {
-#			echo common()->_show_execution_time();
+		if (DEBUG_MODE && main()->NO_GRAPHICS && !main()->CONSOLE_MODE && !main()->is_ajax()) {
 			echo common()->show_debug_info();
 		}
 		// Output cache for 'no graphics' content
 		if (main()->NO_GRAPHICS && main()->OUTPUT_CACHING && $init_type == 'user' && $_SERVER['REQUEST_METHOD'] == 'GET') {
-			_class('output_cache')->_put_page_to_output_cache(ob_get_contents());
+			_class('output_cache')->_put_page_to_output_cache(ob_get_clean());
 		}
 		if (main()->LOG_EXEC || $this->LOG_EXEC_INFO) {
 			_class('logs')->log_exec();
@@ -333,17 +315,6 @@ class yf_tpl {
 		if ($this->EXIT_AFTER_ECHO) {
 			exit();
 		}
-	}
-
-	/**
-	* Try to run center block module/method if allowed
-	*/
-	function prefetch_center ($CHECK_IF_ALLOWED = false) {
-		// Skip security checks for console mode
-		if (main()->CONSOLE_MODE) {
-			return main()->tasks($CHECK_IF_ALLOWED);
-		}
-		return _class('graphics')->prefetch_center($CHECK_IF_ALLOWED);
 	}
 
 	/**
@@ -370,7 +341,14 @@ class yf_tpl {
 	* Simple template parser (*.stpl)
 	*/
 	function parse($name, $replace = array(), $params = array()) {
-		$name = strtolower($name);
+		$name = strtolower(trim($name));
+		// Support for the driver name in prefix, example: "twig:user/account", "smarty:user/account"
+		if (strpos($name, ':') !== false) {
+			list($driver, $name) = explode(':', $name);
+			if ($driver) {
+				$params['driver'] = $driver;
+			}
+		}
 		// Support for the framework calls
 		$yf_prefix = 'yf_';
 		$yfp_len = strlen($yf_prefix);
@@ -383,7 +361,7 @@ class yf_tpl {
 		$string = $params['string'] ?: false;
 		$params['replace_images'] = $params['replace_images'] ?: true;
 		$params['no_cache'] = $params['no_cache'] ?: false;
-		$params['get_from_db'] = $params['get_from_db'] ?: false;
+		$params['force_storage'] = $params['force_storage'] ?: '';
 		$params['no_include'] = $params['no_include'] ?: false;
 		if (DEBUG_MODE) {
 			$stpl_time_start = microtime(true);
@@ -476,28 +454,28 @@ class yf_tpl {
 	/**
 	* Alias
 	*/
-	function exists ($stpl_name = '', $get_from_db = false) {
-		return (bool)$this->_stpl_exists($stpl_name, $get_from_db);
+	function exists ($stpl_name = '', $force_storage = '') {
+		return (bool)$this->_stpl_exists($stpl_name, $force_storage);
 	}
 
 	/**
 	* Check if template exists (simple wrapper for the '_get_template_file')
 	*/
-	function _stpl_exists ($stpl_name = '', $get_from_db = false) {
-		return (bool)$this->_get_template_file($stpl_name, $get_from_db, 1);
+	function _stpl_exists ($stpl_name = '', $force_storage = '') {
+		return (bool)$this->_get_template_file($stpl_name, $force_storage, 1);
 	}
 
 	/**
 	* Alias
 	*/
-	function get ($file_name = '', $get_from_db = false, $JUST_CHECK_IF_EXISTS = false, $RETURN_TEMPLATE_PATH = false) {
-		return $this->_get_template_file($file_name, $get_from_db, $JUST_CHECK_IF_EXISTS, $RETURN_TEMPLATE_PATH);
+	function get ($file_name = '', $force_storage = '', $JUST_CHECK_IF_EXISTS = false, $RETURN_TEMPLATE_PATH = false) {
+		return $this->_get_template_file($file_name, $force_storage, $JUST_CHECK_IF_EXISTS, $RETURN_TEMPLATE_PATH);
 	}
 
 	/**
 	* Read template file contents (or get it from DB)
 	*/
-	function _get_template_file ($file_name = '', $get_from_db = false, $JUST_CHECK_IF_EXISTS = false, $RETURN_TEMPLATE_PATH = false) {
+	function _get_template_file ($file_name = '', $force_storage = '', $JUST_CHECK_IF_EXISTS = false, $RETURN_TEMPLATE_PATH = false) {
 		$string	 = false;
 		$NOT_FOUND  = false;
 		$storage	= 'inline';
@@ -514,7 +492,7 @@ class yf_tpl {
 		// Fix double extesion
 		$file_name  = str_replace($this->_STPL_EXT.$this->_STPL_EXT, $this->_STPL_EXT, $file_name);
 		$stpl_name  = str_replace($this->_STPL_EXT, '', $file_name);
-		if ($this->GET_STPLS_FROM_DB || $get_from_db) {
+		if ($this->GET_STPLS_FROM_DB || $force_storage == 'db') {
 			if ($this->FROM_DB_GET_ALL) {
 				if (!empty($this->_TMP_FROM_DB[$stpl_name])) {
 					$string = $this->_TMP_FROM_DB[$stpl_name];
@@ -543,32 +521,28 @@ class yf_tpl {
 			// Developer overrides
 			if (conf('DEV_MODE')) {
 				if ($site_path && $site_path != PROJECT_PATH) {
-					$storages['dev_site']   = $site_path. $dev_path. $this->TPL_PATH. $file_name;
+					$storages['dev_site'] = $site_path. $dev_path. $this->TPL_PATH. $file_name;
 				}
-				$storages['dev_project']	= PROJECT_PATH. $dev_path. $this->TPL_PATH. $file_name;
+				$storages['dev_project'] = PROJECT_PATH. $dev_path. $this->TPL_PATH. $file_name;
 			}
 			if ($this->ALLOW_LANG_BASED_STPLS) {
-				$storages['lang_project']   = $this->_lang_theme_path. $file_name;
+				$storages['lang_project'] = $this->_lang_theme_path. $file_name;
 			}
 			if ($site_path && $site_path != PROJECT_PATH) {
-				$storages['site']		   = $site_path. $this->TPL_PATH. $file_name;
+				$storages['site'] = $site_path. $this->TPL_PATH. $file_name;
 			}
-			$storages['project']			= PROJECT_PATH. $this->TPL_PATH. $file_name;
+			$storages['project'] = PROJECT_PATH. $this->TPL_PATH. $file_name;
 			if ($this->_INHERITED_SKIN) {
-				$storages['inherit_project']= PROJECT_PATH. $this->_THEMES_PATH. $this->_INHERITED_SKIN. '/'. $file_name;
+				$storages['inherit_project'] = PROJECT_PATH. $this->_THEMES_PATH. $this->_INHERITED_SKIN. '/'. $file_name;
 			}
 			if ($this->_INHERITED_SKIN2) {
-				$storages['inherit_project2']= PROJECT_PATH. $this->_THEMES_PATH. $this->_INHERITED_SKIN2. '/'. $file_name;
+				$storages['inherit_project2'] = PROJECT_PATH. $this->_THEMES_PATH. $this->_INHERITED_SKIN2. '/'. $file_name;
 			}
-			$storages['framework']		  = YF_PATH. $this->_THEMES_PATH. MAIN_TYPE.'/'. $file_name;
-			$storages['framework_p2']	   = YF_PATH. 'priority2/'. $this->_THEMES_PATH. MAIN_TYPE.'/'. $file_name;
-			// user section within admin
-			if (MAIN_TYPE_ADMIN) {
-				$storages['user_section']	   = PROJECT_PATH. $this->_THEMES_PATH. $this->_get_def_user_theme(). '/'. $file_name;
-				$storages['framework_user']	 = YF_PATH. $this->_THEMES_PATH. 'user/'. $file_name;
-				$storages['framework_user_p2']  = YF_PATH. 'priority2/'. $this->_THEMES_PATH. 'user/'. $file_name;
+			// in admin mode: not include main, style_css, script_js templates from project place
+			if (MAIN_TYPE_ADMIN && !in_array($stpl_name, array('main'/*, 'style_css', 'script_js'*/))) {
+				$storages['project_admin_user'] = PROJECT_PATH. $this->_THEMES_PATH. $this->_get_def_user_theme(). '/'. $file_name;
 			}
-			// Load template from plugins. Should stay in subdir like this:  
+			// Load template from plugins. Should stay in subdir like this:
 			// YF_PATH.'plugins/news/templates/user/news/main.stpl' => tpl()->parse('news/main')
 			if ($class_name && (isset($this->_yf_plugins[$class_name]) || isset($this->_yf_plugins_classes[$class_name]))) {
 				if (isset($this->_yf_plugins[$class_name])) {
@@ -585,14 +559,24 @@ class yf_tpl {
 				}
 				$storages['plugins_framework'] = YF_PATH. $plugin_subdir. $this->TPL_PATH. $file_name;
 				if (MAIN_TYPE_ADMIN) {
-					$storages['plugins_user_section']	 = PROJECT_PATH. $plugin_subdir. $this->_THEMES_PATH. $this->_get_def_user_theme(). '/'. $file_name;
-					$storages['plugins_framework_user']	 = YF_PATH. $plugin_subdir. $this->_THEMES_PATH. 'user/'. $file_name;
+					$storages['plugins_user_section'] = PROJECT_PATH. $plugin_subdir. $this->_THEMES_PATH. $this->_get_def_user_theme(). '/'. $file_name;
+					$storages['plugins_framework_user']	= YF_PATH. $plugin_subdir. $this->_THEMES_PATH. 'user/'. $file_name;
 				}
+			}
+			$storages['framework'] = YF_PATH. $this->_THEMES_PATH. MAIN_TYPE.'/'. $file_name;
+			$storages['framework_p2'] = YF_PATH. 'priority2/'. $this->_THEMES_PATH. MAIN_TYPE.'/'. $file_name;
+			// user section within admin
+			if (MAIN_TYPE_ADMIN) {
+				$storages['framework_user']	= YF_PATH. $this->_THEMES_PATH. 'user/'. $file_name;
+				$storages['framework_user_p2'] = YF_PATH. 'priority2/'. $this->_THEMES_PATH. 'user/'. $file_name;
 			}
 			// Try storages one-by-one in inheritance `order`, stop when found
 			$storage = '';
 			foreach ((array)$storages as $_storage => $file_path) {
-				if (!$this->_stpl_path_exists($file_path, $stpl_name, $_storage)) {
+				if ($force_storage && $force_storage != $_storage) {
+					continue;
+				}
+				if (!$this->_stpl_path_exists($file_path)) {
 					continue;
 				}
 				$string = file_get_contents($file_path);
@@ -604,7 +588,6 @@ class yf_tpl {
 			// Last try from cache (preloaded templates)
 			if ($string === false) {
 				$compiled_stpl = conf('_compiled_stpls::'.$stpl_name);
-// TODO: maybe move this uppper to have much more inheritance priority
 				if ($compiled_stpl) {
 					$string	 = $compiled_stpl;
 					$storage = 'compiled_cache';
@@ -613,6 +596,10 @@ class yf_tpl {
 			if ($string === false) {
 				$NOT_FOUND = true;
 			}
+		}
+		if (DEBUG_MODE) {
+			$this->driver->debug[$stpl_name]['storage'] = $storage;
+			$this->driver->debug[$stpl_name]['storages'] = $storages;
 		}
 		if ($RETURN_TEMPLATE_PATH) {
 			return $file_path;
@@ -624,8 +611,6 @@ class yf_tpl {
 		// Log error message if template file was not found
 		if ($NOT_FOUND) {
 			trigger_error('STPL: template "'.$file_name.'" in theme "'.conf('theme').'" not found.', E_USER_WARNING);
-		} else {
-			$this->driver->CACHE[str_replace($this->_STPL_EXT, '', $file_name)]['storage'] = $storage;
 		}
 		return $string;
 	}
@@ -643,7 +628,7 @@ class yf_tpl {
 			$this->_def_user_theme = $FIRST_SITE_INFO['DEFAULT_SKIN'];
 		}
 		if (empty($this->_def_user_theme)) {
-			$this->_def_user_theme = 'new_1';
+			$this->_def_user_theme = 'user';
 		}
 		return $this->_def_user_theme;
 	}
@@ -651,69 +636,14 @@ class yf_tpl {
 	/**
 	* Check if given template exists
 	*/
-	function _stpl_path_exists ($file_name = '', $stpl_name = '', $location = '') {
-		if ($this->USE_PATHS_CACHE) {
-			if ($this->_stpls_paths_cache[$stpl_name] & $this->_stpl_loc_codes[$location]) {
-				return true;
-			}
-			return false;
-		} else {
-			return file_exists($file_name);
-		}
+	function _stpl_path_exists ($file_name) {
+		return file_exists($file_name);
 	}
 
 	/**
-	* Prepare paths cache
-	*/
-	function _prepare_paths_cache () {
-		if (!$this->USE_PATHS_CACHE || $this->_stpls_paths_cache) {
-			return false;
-		}
-		$stpls_paths = array();
-		$CACHE_NAME = 'stpls_paths_'.(MAIN_TYPE_ADMIN ? 'admin' : 'site_'.conf('SITE_ID'));
-		$stpls_paths = cache()->get($CACHE_NAME);
-		// Create full array (cache is empty or turned off)
-		if (empty($stpls_paths)) {
-			if (MAIN_TYPE_ADMIN) {
-				$def_user_theme = $this->_get_def_user_theme();
-				$paths = array(
-					'framework'	 	=> YF_PATH. $this->_THEMES_PATH. 'admin'. '/',
-					'framework_user'=> YF_PATH. $this->_THEMES_PATH. 'user'. '/',
-					'user_section'  => INLCUDE_PATH. $this->_THEMES_PATH. $def_user_theme. '/',
-				);
-			} else {
-				$paths = array(
-					'site'		 		=> SITE_PATH. $this->_THEMES_PATH. conf('theme'). '/',
-					'project'	  		=> PROJECT_PATH. $this->_THEMES_PATH. conf('theme'). '/',
-					'framework'		 	=> YF_PATH. $this->_THEMES_PATH. 'user'. '/',
-					'inherit_project'	=> $this->_INHERITED_SKIN ? PROJECT_PATH. $this->_THEMES_PATH. $this->_INHERITED_SKIN. '/'. $file_name : '',
-					'inherit_project2'	=> $this->_INHERITED_SKIN2 ? PROJECT_PATH. $this->_THEMES_PATH. $this->_INHERITED_SKIN2. '/'. $file_name : '',
-				);
-			}
-			$ext_length = strlen($this->_STPL_EXT);
-			// Process paths
-			foreach ((array)$paths as $_location => $_path) {
-				if (empty($_path)) {
-					continue;
-				}
-				$_path_length = strlen($_path);
-				foreach ((array)_class('dir')->scan_dir($_path, 1, array('', '/\.stpl$/i'), '/(svn|git)/') as $_cur_path) {
-					$_cur_path = substr($_cur_path, $_path_length, -$ext_length);
-					if ($_cur_path) {
-						$stpls_paths[$_cur_path] += $this->_stpl_loc_codes[$_location];
-					}
-				}
-			}
-			ksort($stpls_paths);
-			cache()->put($CACHE_NAME, $stpls_paths);
-		}
-		$this->_stpls_paths_cache = $stpls_paths;
-	}
-
-	/**
+	* If content need to be cleaned from unused tags - do that
 	*/
 	function _process_clear_unused($string, $replace = array(), $name = '') {
-		// If content need to be cleaned from unused tags - do that
 		return preg_replace('/\{[\w_]+\}/i', '', $string);
 	}
 
@@ -762,14 +692,14 @@ class yf_tpl {
 	* Replace method for 'IFRAME in center' mode
 	*/
 	function _replace_for_iframe_callback ($text = '') {
-		return module('rewrite')->_replace_links_for_iframe($text);
+		return _class('rewrite')->_replace_links_for_iframe($text);
 	}
 
 	/**
 	* Rewrite links callback method
 	*/
 	function _rewrite_links_callback ($text = '') {
-		return module('rewrite')->_rewrite_replace_links($text);
+		return _class('rewrite')->_rewrite_replace_links($text);
 	}
 
 	/**
@@ -779,11 +709,13 @@ class yf_tpl {
 		if (!class_exists('tidy') || !extension_loaded('tidy')) {
 			return $text;
 		}
-		// Tidy
+		$tidy_default_config = array(
+			'alt-text' => '',
+			'output-xhtml' => true,
+		);
 		$tidy = new tidy;
-		$tidy->parseString($text, $this->_TIDY_CONFIG, conf('charset'));
+		$tidy->parseString($text, $this->_TIDY_CONFIG ?: $tidy_default_config, conf('charset'));
 		$tidy->cleanRepair();
-		// Output
 		return $tidy;
 	}
 
@@ -793,10 +725,7 @@ class yf_tpl {
 		if (!DEBUG_MODE) {
 			return $text;
 		}
-		$p = "<span class='locale_tr' s_var='[^\']+?'>([^<]+?)<\/span>";
-		$text = preg_replace("/(<title>)(.*?)(<\/title>)/imse", "'\\1'.strip_tags('\\2').'\\3'", $text);
-		// Output
-		return $text;
+		return preg_replace_callback('~(<title>)(.*?)(</title>)~ims', function($m) { return $m[1]. strip_tags($m[2]). $m[3]; }, $text);
 	}
 
 	/**
@@ -832,7 +761,6 @@ class yf_tpl {
 			}
 			$text_to_translate = $m['text'];
 		} else {
-			// Easy case that just needs to be translated
 			$text_to_translate = $input;
 		}
 		$output = t($text_to_translate, $args);
@@ -853,43 +781,10 @@ class yf_tpl {
 	*/
 	function _translate_for_stpl ($string = '', $args_from_tpl = '', $lang = '') {
 		$args = array();
-		// Try to convert args
 		if (is_string($args_from_tpl) && strlen($args_from_tpl)) {
-			$args_from_tpl = stripslashes($args_from_tpl);
-			$tmp_array = explode(';', $args_from_tpl);
-			// Convert string into array
-			foreach ((array)$tmp_array as $v) {
-				$attrib_name = '';
-				$attrib_value = '';
-				if (false !== strpos($v, '=')) {
-					list($attrib_name, $attrib_value) = explode('=', trim($v));
-				}
-				$attrib_name	= trim(str_replace(array("'",'"'), '', $attrib_name));
-				$attrib_value	= trim(str_replace(array("'",'"'), '', $attrib_value));
-				$args[$attrib_name] = $attrib_value;
-			}
+			$args = _attrs_string2array($args_from_tpl);
 		}
 		return t($string, $args, $lang);
-	}
-
-	/**
-	* Search template for the string that caused an error
-	*/
-	function _search_stpl_line ($class_name, $method_name, $method_params = '', $tpl_name) {
-		// Search in site
-		$stpl_file	= SITE_PATH. tpl()->TPL_PATH. $tpl_name;
-		// Search in project
-		if (!file_exists($stpl_file)) {
-			$stpl_file = PROJECT_PATH. tpl()->TPL_PATH. $tpl_name;
-		}
-		// Search in framework
-		if (!file_exists($stpl_file)) {
-			$stpl_file = YF_PATH. tpl()->TPL_PATH. $tpl_name;
-		}
-		if (file_exists($stpl_file)) {
-			$line_search = preg_grep("/\{execute\([\"']*".$class_name.','.$method_name.(!empty($method_params) ? ','.$method_params : '')."[\"']*\)\}/i", @file($stpl_file));
-			return ' on line '.intval(array_shift(array_keys($line_search)) + 1);
-		}
 	}
 
 	/**
@@ -906,17 +801,7 @@ class yf_tpl {
 			if ($params[0] == '/') {
 				// Do nothing, just directly pass this to url() as string
 			} elseif (false !== strpos($params, '=')) {
-				$tmp_params	 = explode(';', str_replace(',', ';', $params));
-				$params  = array();
-				// Convert params string into array
-				foreach ((array)$tmp_params as $v) {
-					$attrib_name = '';
-					$attrib_value = '';
-					if (false !== strpos($v, '=')) {
-						list($attrib_name, $attrib_value) = explode('=', trim($v));
-					}
-					$params[trim($attrib_name)] = trim($attrib_value);
-				}
+				$params = _attrs_string2array($params);
 			} else {
 				list($object, $action, $id, $page) = explode(';', str_replace(',', ';', $params));
 				$params = array(
@@ -964,5 +849,11 @@ class yf_tpl {
 			}
 		}
 		return $text;
+	}
+
+	/**
+	*/
+	function add_pattern_callback($pattern, $func) {
+		$this->_custom_patterns[$pattern] = $func;
 	}
 }

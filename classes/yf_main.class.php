@@ -1,7 +1,7 @@
 <?php
 
 /**
-* Core ProEngine class
+* Core main class
 *
 * @package		YF
 * @author		YFix Team <yfix.dev@gmail.com>
@@ -27,8 +27,6 @@ class yf_main {
 	public $USE_TASK_MANAGER		= false;
 	/** @var bool Output caching on/off */
 	public $OUTPUT_CACHING			= false;
-	/** @var bool GZIP compression for output buffer on/off */
-	public $OUTPUT_GZIP_COMPRESS	= false;
 	/** @var bool Send no-cache headers */
 	public $NO_CACHE_HEADERS		= true;
 	/** @var bool Strict init modules check (if turned on - then module need to be installed not only found) */
@@ -89,9 +87,14 @@ class yf_main {
 	public $HTTPS_ENABLED_FOR		= array( /* 'object=shop', */ );
 	/** @var bool Track user last visit */
 	public $TRACK_USER_PAGE_VIEWS	= false;
-	/** @var bool Auto-pack PHP code and use it @experimental */
-	public $AUTO_PACK_PHP_CODE		= false;
-	/** @var bool Paid options global switch used by lot of other code @experimental */
+	/** @var bool Track online status */
+	public $TRACK_ONLINE_STATUS     = false;
+	/** @var bool Track details (online status=true is needed too) */
+	public $TRACK_ONLINE_DETAILS	= false;
+	/** @var bool Enable notifications module for user/admin */
+	public $ENABLE_NOTIFICATIONS_USER	= false;
+	public $ENABLE_NOTIFICATIONS_ADMIN	= false;
+    /** @var bool Paid options global switch used by lot of other code @experimental */
 	public $ALLOW_PAID_OPTIONS		= false;
 	/** @var bool Allow cache control from url modifiers */
 	public $CACHE_CONTROL_FROM_URL	= false;
@@ -117,8 +120,6 @@ class yf_main {
 	public $USER_GROUP				= 0;
 	/** @var array @conf_skip Current user session info */
 	public $USER_INFO				= null;
-	/** @var array */
-	public $_auto_info_skip_modules = array('user_data','db','cache','errors','spider_detect','user_profile');
 	/** @var array List of objects/actions for which no db connection is required. @example: 'object' => array('action1', 'action2') */
 	public $NO_DB_FOR				= array('internal' => array(), 'dynamic' => array('php_func'));
 	/** @var int Error reporting level for production/non-debug mode (int from built-in constants) */
@@ -138,9 +139,9 @@ class yf_main {
 	/** @var string @conf_skip Multi-server mode option */
 	public $SERVER_ROLE				= null;
 	/** @var bool */
-	public $ALLOW_DEBUG_PROFILING	= 0;
+	public $ALLOW_DEBUG_PROFILING	= false;
 	/** @var bool @conf_skip */
-	public $PROFILING				= 0;
+	public $PROFILING				= false;
 
 	/**
 	* Engine constructor
@@ -154,7 +155,7 @@ class yf_main {
 		if (defined('DEBUG_MODE') && DEBUG_MODE && ($this->ALLOW_DEBUG_PROFILING || $CONF['main']['ALLOW_DEBUG_PROFILING'])) {
 			$this->PROFILING = true;
 		}
-		if ($this->_server('argc') && !array_key_exists('REQUEST_METHOD', $this->_server())) {
+		if ($_SERVER['argc'] && !isset($_SERVER['REQUEST_METHOD'])) {
 			$this->CONSOLE_MODE = true;
 		}
 		error_reporting(0); // Remove all errors initially
@@ -173,21 +174,22 @@ class yf_main {
 		try {
 			$this->init_conf_functions();
 			$this->_before_init_hook();
-			$this->fix_required_constants();
-			$this->set_required_php_params();
-			$this->_set_module_conf('main', $this); // // Load project config for self
+			$this->init_constants();
+			$this->init_php_params();
+			$this->set_module_conf('main', $this); // // Load project config for self
 			$this->init_firephp();
 			$this->init_server_health();
 			$this->try_fast_init();
 			$this->init_modules_base();
-			$this->init_cache_functions();
+			$this->init_main_functions();
+			$this->init_events();
+			$this->init_cache();
 			$this->init_files();
 			$this->init_db();
 			$this->init_common();
 			$this->init_class('graphics', 'classes/');
 			$this->load_class_file('module', 'classes/');
 			$this->init_error_reporting();
-			$this->init_cache();
 			$this->init_site_id();
 			$this->init_server_id();
 			$this->init_server_role();
@@ -199,12 +201,10 @@ class yf_main {
 			$this->_after_init_hook();
 			if ($auto_init_all) {
 				$this->init_auth();
-				$this->tpl->init_graphics();
+				$this->init_content();
 			}
-			// Add framework destructor functionality (allows to execute custom code before shutdown)
 			register_shutdown_function(array($this, '_framework_destruct'));
 		} catch (Exception $e) {
-// TODO: show pretty html message with Exception contents
 			$msg = 'MAIN: Caught exception: '.print_r($e->getMessage(), 1). PHP_EOL. '<pre>'.$e->getTraceAsString().'</pre>';
 			trigger_error($msg, E_USER_WARNING);
 		}
@@ -213,9 +213,8 @@ class yf_main {
 	/**
 	* Catch missing method call
 	*/
-	function __call($name, $arguments) {
-		trigger_error(__CLASS__.': No method '.$name, E_USER_WARNING);
-		return false;
+	function __call($name, $args) {
+		return $this->extend_call($this, $name, $args);
 	}
 
 	/**
@@ -272,6 +271,13 @@ class yf_main {
 		$this->_check_site_maintenance();
 
 		$this->_do_rewrite();
+        
+        if ($this->TRACK_ONLINE_STATUS) _class('online_users', 'classes/')->process();	
+		if ($this->type == 'admin') {
+            if ($this->ENABLE_NOTIFICATIONS_ADMIN) _class('notifications', 'modules/')->_prepare();
+        } else {
+            if ($this->ENABLE_NOTIFICATIONS_USER) _class('notifications', 'modules/')->_prepare();
+        }
 
 		$this->_init_cur_user_info($this);
 
@@ -282,13 +288,19 @@ class yf_main {
 				}
 			});
 		}
-		conf('filter_hidden', $this->_cookie('filter_hidden') ? 1 : 0);
-		conf('qm_hidden', $this->_cookie('qm_hidden') ? 1 : 0);
+		conf('filter_hidden', $_COOKIE['filter_hidden'] ? 1 : 0);
+		conf('qm_hidden', $_COOKIE['qm_hidden'] ? 1 : 0);
 
 		$https_needed = $this->USE_ONLY_HTTPS;
 		if (!$https_needed) {
-			foreach ((array)$this->HTTPS_ENABLED_FOR as $_item) {
-				if (preg_match('/'.$_item.'/ims', $this->_server('QUERY_STRING'))) {
+			$query_string = $this->_server('QUERY_STRING');
+			foreach ((array)$this->HTTPS_ENABLED_FOR as $item) {
+				if (is_callable($item)) {
+					if ($item($query_string)) {
+						$https_needed = true;
+						break;
+					}
+				} elseif (preg_match('@'.$item.'@ims', $query_string)) {
 					$https_needed = true;
 					break;
 				}
@@ -337,7 +349,7 @@ class yf_main {
         unset($_GET['object']);
         unset($_GET['action']);
 
-		$arr = module('rewrite')->REWRITE_PATTERNS['yf']->_parse($host, $u_arr, $_GET);
+		$arr = _class('rewrite')->REWRITE_PATTERNS['yf']->_parse($host, $u_arr, $_GET);
 
         foreach ((array)$arr as $k => $v) {
             if ($k != '%redirect_url%') {
@@ -360,20 +372,20 @@ class yf_main {
 	*/
 	function init_conf_functions () {
 		$this->PROFILING && $this->_timing[] = array(microtime(true), __CLASS__, __FUNCTION__, $this->trace_string(), func_get_args());
-		$fwork_conf_path = dirname(dirname(__FILE__)).'/share/functions/yf_conf.php';
-		if (file_exists($fwork_conf_path)) {
-			$this->include_module($fwork_conf_path, 1);
+		$path = dirname(dirname(__FILE__)).'/share/functions/yf_conf.php';
+		if (file_exists($path)) {
+			$this->include_module($path, 1);
 		}
 	}
 
 	/**
-	* cache_set(), cache_get(), cache_del() wrappers
+	* main(), _class(), module(), db(), tpl(), common() wrappers and more
 	*/
-	function init_cache_functions () {
+	function init_main_functions () {
 		$this->PROFILING && $this->_timing[] = array(microtime(true), __CLASS__, __FUNCTION__, $this->trace_string(), func_get_args());
-		$fwork_cache_path	= dirname(dirname(__FILE__)).'/share/functions/yf_cache.php';
-		if (file_exists($fwork_cache_path)) {
-			$this->include_module($fwork_cache_path, 1);
+		$path = dirname(dirname(__FILE__)).'/share/functions/yf_aliases.php';
+		if (file_exists($path)) {
+			$this->include_module($path, 1);
 		}
 	}
 
@@ -384,7 +396,9 @@ class yf_main {
 		$this->PROFILING && $this->_timing[] = array(microtime(true), __CLASS__, __FUNCTION__, $this->trace_string(), func_get_args());
 		$include_files = array();
 		$required_files = array();
+		$this->events->fire('main.before_files');
 		if ($this->NO_DB_CONNECT == 0) {
+			$include_files[] = CONFIG_PATH. 'db_setup.php';
 			$include_files[] = PROJECT_PATH. 'db_setup.php';
 		}
 		foreach ((array)conf('include_files::'.MAIN_TYPE) as $path) {
@@ -428,9 +442,10 @@ class yf_main {
 	*/
 	function init_db() {
 		$this->PROFILING && $this->_timing[] = array(microtime(true), __CLASS__, __FUNCTION__, $this->trace_string(), func_get_args());
+		$this->events->fire('main.before_db');
 		// Check if current object/action not required db connection
-		$get_object = $this->_get('object');
-		$get_action = $this->_get('action');
+		$get_object = $_GET['object'];
+		$get_action = $_GET['action'];
 		if ($this->NO_DB_FOR && $get_object && isset($this->NO_DB_FOR[$get_object])) {
 			if (empty($this->NO_DB_FOR[$get_object]) || ($get_action && in_array($get_action, $this->NO_DB_FOR[$get_object]))) {
 				$this->NO_DB_CONNECT = true;
@@ -441,47 +456,83 @@ class yf_main {
 		}
 		if (!isset($GLOBALS['db'])) {
 			$this->init_class('db', 'classes/');
-			$GLOBALS['db'] =& $this->modules['db'];
+			$GLOBALS['db'] = &$this->modules['db'];
 		} else {
-			$this->_set_module_conf('db', $this->modules['db']);
+			$this->set_module_conf('db', $this->modules['db']);
 		}
-		$this->db =& $this->modules['db'];
+		$this->db = &$this->modules['db'];
+		$this->events->fire('main.after_db');
+	}
+
+	/**
+	*/
+	function init_events () {
+		$this->PROFILING && $this->_timing[] = array(microtime(true), __CLASS__, __FUNCTION__, $this->trace_string(), func_get_args());
+		$this->events = &$this->init_class('core_events', 'classes/');
+		// Load event listeners from supported locations
+		$ext = '.listener.php';
+		$globs = array(
+			'yf_core'			=> YF_PATH. 'share/events/*'.$ext,
+			'yf_plugins'		=> YF_PATH. 'plugins/*/share/events/*'.$ext,
+			'project_core'		=> PROJECT_PATH. 'share/events/*'.$ext,
+			'project_plugins'	=> PROJECT_PATH. 'plugins/*/share/events/*'.$ext,
+		);
+		foreach ($globs as $glob) {
+			foreach (glob($glob) as $path) {
+				require_once $path;
+			}
+		}
 	}
 
 	/**
 	*/
 	function init_common() {
 		$this->PROFILING && $this->_timing[] = array(microtime(true), __CLASS__, __FUNCTION__, $this->trace_string(), func_get_args());
-		$this->init_class('common', 'classes/');
-		$this->common =& $this->modules['common'];
-		$GLOBALS['common'] =& $this->modules['common'];
+		$this->common = &$this->init_class('common', 'classes/');
+		$GLOBALS['common'] = &$this->common;
 	}
 
 	/**
 	*/
 	function init_tpl() {
 		$this->PROFILING && $this->_timing[] = array(microtime(true), __CLASS__, __FUNCTION__, $this->trace_string(), func_get_args());
-		$this->init_class('tpl', 'classes/');
-		$this->tpl =& $this->modules['tpl'];
-		$GLOBALS['tpl'] =& $this->modules['tpl'];
+		$this->events->fire('main.before_tpl');
+		$this->tpl = &$this->init_class('tpl', 'classes/');
+		$GLOBALS['tpl'] = &$this->tpl;
+		$this->events->fire('main.after_tpl');
+	}
+
+	/**
+	*/
+	function init_content () {
+		$this->PROFILING && $this->_timing[] = array(microtime(true), __CLASS__, __FUNCTION__, $this->trace_string(), func_get_args());
+		$this->events->fire('main.before_content');
+
+		$this->tpl->init_graphics();
+
+		$this->is_post() && $this->events->fire('main.on_post');
+		$this->is_ajax() && $this->events->fire('main.on_ajax');
+		$this->is_console() && $this->events->fire('main.on_console');
+		$this->is_redirect() && $this->events->fire('main.on_redirect');
+
+		$this->events->fire('main.after_content');
 	}
 
 	/**
 	*/
 	function init_cache() {
 		$this->PROFILING && $this->_timing[] = array(microtime(true), __CLASS__, __FUNCTION__, $this->trace_string(), func_get_args());
-		if ($this->CACHE_CONTROL_FROM_URL && $this->_get('no_core_cache')) {
-			$this->USE_SYSTEM_CACHE = false;
+		$this->events->fire('main.before_cache');
+		$CACHE_DRIVER = conf('CACHE_DRIVER');
+		if ($CACHE_DRIVER) {
+			conf('cache::DRIVER', $CACHE_DRIVER);
 		}
-		if ($this->USE_SYSTEM_CACHE) {
-			$this->init_class('cache', 'classes/');
-			if (method_exists($this->modules['cache'], '_init_from_main')) {
-				$this->_set_module_conf('cache', $this->modules['cache']);
-				$this->modules['cache']->_init_from_main();
-			}
-			$this->sys_cache =& $this->modules['cache'];
-			$GLOBALS['sys_cache'] =& $this->modules['cache'];
+		$this->cache = &$this->init_class('cache', 'classes/');
+		if (!$this->USE_SYSTEM_CACHE) {
+			$this->cache->NO_CACHE = true;
 		}
+		$GLOBALS['cache'] = &$this->cache;
+		$this->events->fire('main.after_cache');
 	}
 
 	/**
@@ -489,8 +540,7 @@ class yf_main {
 	function init_error_reporting() {
 		$this->PROFILING && $this->_timing[] = array(microtime(true), __CLASS__, __FUNCTION__, $this->trace_string(), func_get_args());
 		if ($this->USE_CUSTOM_ERRORS) {
-			$this->init_class('errors', 'classes/');
-			$this->error_handler =& $this->modules['errors'];
+			$this->error_handler = &$this->init_class('core_errors', 'classes/');
 		}
 		if ($this->ERROR_LOG_PATH) {
 			$replace = array(
@@ -524,14 +574,12 @@ class yf_main {
 	}
 
 	/**
-	* FirePHP connection
 	*/
 	function init_firephp () {
 		$this->PROFILING && $this->_timing[] = array(microtime(true), __CLASS__, __FUNCTION__, $this->trace_string(), func_get_args());
 		if (!$this->FIREPHP_ENABLE) {
 			return false;
 		}
-		// Already initialized earlier
 		if (function_exists('fb') && class_exists('FirePHP')) {
 			return true;
 		}
@@ -542,7 +590,6 @@ class yf_main {
 	}
 
 	/**
-	* Try to detect spider
 	*/
 	function spider_detection () {
 		$this->PROFILING && $this->_timing[] = array(microtime(true), __CLASS__, __FUNCTION__, $this->trace_string(), func_get_args());
@@ -553,7 +600,7 @@ class yf_main {
 		if (isset($_spider_name)) {
 			return $_spider_name;
 		}
-		$SPIDER_NAME = $this->modules['common']->_is_spider($this->_server('REMOTE_ADDR'), $this->_server('HTTP_USER_AGENT'));
+		$SPIDER_NAME = $this->modules['common']->_is_spider($_SERVER['REMOTE_ADDR'], $_SERVER['HTTP_USER_AGENT']);
 		if (empty($SPIDER_NAME)) {
 			if (preg_match('/(bot|spider|crawler|curl|wget)/ims', $USER_AGENT)) {
 				$SPIDER_NAME = 'Unknown spider';
@@ -567,10 +614,10 @@ class yf_main {
 	}
 
 	/**
-	* Initialize session
 	*/
 	function init_session () {
 		$this->PROFILING && $this->_timing[] = array(microtime(true), __CLASS__, __FUNCTION__, $this->trace_string(), func_get_args());
+		$this->events->fire('main.before_session');
 		if (isset($this->_session_init_complete) || $this->CONSOLE_MODE) {
 			return false;
 		}
@@ -616,13 +663,13 @@ class yf_main {
 		if ($this->SESSION_REFERER_CHECK) { // WEB_PATH
 			ini_set('session.referer_check', $this->SESSION_REFERER_CHECK);
 		}
-		conf('COOKIES_ENABLED', !is_null($this->_cookie($this->SESSION_NAME)) ? 1 : 0);
+		conf('COOKIES_ENABLED', !is_null($_COOKIE[$this->SESSION_NAME]) ? 1 : 0);
 		// Check if we have valid session name
-		if (!is_null($this->_cookie($this->SESSION_NAME))) {
-			$_test_result = preg_replace('/[^a-z0-9]/i', '', $this->_cookie($this->SESSION_NAME));
-			if ($_test_result !== $this->_cookie($this->SESSION_NAME)) {
-				$this->_cookie($this->SESSION_NAME, abs(crc32(microtime(true))));
-				session_id($this->_cookie($this->SESSION_NAME));
+		if (!is_null($_COOKIE[$this->SESSION_NAME])) {
+			$_test_result = preg_replace('/[^a-z0-9]/i', '', $_COOKIE[$this->SESSION_NAME]);
+			if ($_test_result !== $_COOKIE[$this->SESSION_NAME]) {
+				$_COOKIE[$this->SESSION_NAME] = abs(crc32(microtime(true)));
+				session_id($_COOKIE[$this->SESSION_NAME]);
 			}
 		}
 		if (!empty($this->SESSION_SAVE_DIR)) {
@@ -639,8 +686,7 @@ class yf_main {
 				return false;
 			}
 			$this->session = new $session_loaded_class_name();
-			$this->_set_module_conf($session_class_name, $this->session);
-			// Change the save_handler to use the class functions
+			$this->set_module_conf($session_class_name, $this->session);
 			session_set_save_handler (
 				array($this->session, 'open'),
 				array($this->session, 'close'),
@@ -656,7 +702,7 @@ class yf_main {
 			header('X-Robots-Tag: noindex,nofollow,noarchive,nosnippet');
 		}
 		$now = time();
-		$last_update = $this->_session('last_update');
+		$last_update = $_SESSION['last_update'];
 		if ($last_update) {
 			$diff = $now - $last_update;
 			$percent = $diff / $this->SESSION_LIFE_TIME * 100;
@@ -667,12 +713,13 @@ class yf_main {
 			// Session need to be regenerated
 			} elseif ($percent > 10) {
 				session_regenerate_id(/*$delete_old_session = true*/);
-				$this->_session('last_update', $now);
+				$_SESSION['last_update'] = $now;
 			}
 		} else {
-			$this->_session('last_update', $now);
+			$_SESSION['last_update'] = $now;
 		}
 		$this->_session_init_complete = true;
+		$this->events->fire('main.after_session');
 	}
 
 	/**
@@ -680,55 +727,17 @@ class yf_main {
 	*/
 	function init_settings() {
 		$this->PROFILING && $this->_timing[] = array(microtime(true), __CLASS__, __FUNCTION__, $this->trace_string(), func_get_args());
-		$this->set_default_settings();
-/*
-		// Overriding default settings with the values stored in database
-		foreach ((array)$this->get_data('settings') as $k => $v) {
-			conf($k, $v);
-		}
-*/
-		// Overriding default settings with the values stored in database
-		foreach ((array)$this->get_data('conf') as $k => $v) {
-			conf($k, $v);
-		}
-		$output_caching = conf('output_caching');
-		if (isset($output_caching)) {
-			$this->OUTPUT_CACHING = $output_caching;
-		}
-		$gzip_compress = conf('gzip_compress');
-		if (isset($gzip_compress)) {
-			$this->OUTPUT_GZIP_COMPRESS = $gzip_compress;
-		}
-		if ($this->OUTPUT_GZIP_COMPRESS) {
-			if (version_compare( phpversion(), '5.2.4' ) >= 0) {
-				if (ini_get('display_errors')) {
-					ini_set('display_errors', 'stderr');
-				}
-			}
-			if (!extension_loaded('zlib') ||
-				strpos($this->_server('HTTP_ACCEPT_ENCODING'), 'gzip') === false ||
-				(bool)ini_get('zlib.output_compression') ||
-				(bool)ini_get('zend_accelerator.compress_all') ||
-				ini_get('output_handler') == 'ob_gzhandler'
-			) {
-				$this->OUTPUT_GZIP_COMPRESS = false;
-			} else {
-				ini_set('zlib.output_compression_level', 3);
-			}
-		}
-	}
-
-	/**
-	* Default settings container
-	*/
-	function set_default_settings() {
-		$this->PROFILING && $this->_timing[] = array(microtime(true), __CLASS__, __FUNCTION__, $this->trace_string(), func_get_args());
 		$lang = 'en'; // default lang
 		if (defined('DEFAULT_LANG') && DEFAULT_LANG != '') {
 			$lang = DEFAULT_LANG;
 		}
-		conf('language',	$lang);
-		conf('charset',		'utf-8');
+		conf('language', $lang);
+		conf('charset',	 'utf-8');
+		$output_caching = conf('output_caching');
+		if (isset($output_caching)) {
+			$this->OUTPUT_CACHING = $output_caching;
+		}
+		$this->events->fire('main.settings');
 	}
 
 	/**
@@ -739,7 +748,7 @@ class yf_main {
 		if (!conf('SITE_ID')) {
 			$site_id = 1;
 			foreach ((array)$this->get_data('sites') as $site) {
-				if ($site['name'] == $this->_server('HOST_NAME')) {
+				if ($site['name'] == $_SERVER['HOST_NAME']) {
 					$site_id = $site['id'];
 					break;
 				}
@@ -757,14 +766,27 @@ class yf_main {
 		$this->PROFILING && $this->_timing[] = array(microtime(true), __CLASS__, __FUNCTION__, $this->trace_string(), func_get_args());
 		$servers = $this->get_data('servers');
 		$this->SERVER_ID = 0;
-		if (!conf('SERVER_ID')) {
+		if (!conf('SERVER_ID') && ($servers || DEBUG_MODE)) {
+			$self_ips = explode(' ', exec('hostname --all-ip-addresses'));
+			if ($self_ips) {
+				$self_ips = array_combine($self_ips, $self_ips);
+				$this->_server_self_ips = $self_ips;
+			}
 			foreach ((array)$servers as $server) {
-// TODO: try to also get server id from console: "hostname --all-ip-addresses"
-// TODO: this need to be cached to not fork exec on every request
-#		$ips = exec('hostname --all-ip-addresses');
 				if ($server['hostname'] == $this->HOSTNAME) {
 					$this->SERVER_ID = (int)$server['id'];
 					break;
+				}
+				$server_ips = array();
+				if ($self_ips) {
+					foreach (explode(',', str_replace(array(',',';',PHP_EOL,"\t",' '), ',', trim($server['ip']))) as $v) {
+						$v = trim($v);
+						$v && $server_ips[$v] = $v; 
+					}
+					if ($server_ips && array_intersect($self_ips, $server_ips)) {
+						$this->SERVER_ID = (int)$server['id'];
+						break;
+					}
 				}
 			}
 		}
@@ -789,11 +811,11 @@ class yf_main {
 	}
 
 	/**
-	* Starting language engine
+	* Starting localization engine
 	*/
 	function init_locale () {
 		$this->PROFILING && $this->_timing[] = array(microtime(true), __CLASS__, __FUNCTION__, $this->trace_string(), func_get_args());
-		if ($this->_get('no_lang') || conf('no_locale')) {
+		if ($_GET['no_lang'] || conf('no_locale')) {
 			return false;
 		}
 		_class('i18n')->init_locale();
@@ -804,33 +826,28 @@ class yf_main {
 	*/
 	function init_auth () {
 		$this->PROFILING && $this->_timing[] = array(microtime(true), __CLASS__, __FUNCTION__, $this->trace_string(), func_get_args());
+		$this->events->fire('main.before_auth');
 		if (defined('SITE_DEFAULT_PAGE')) {
 			conf('SITE_DEFAULT_PAGE', SITE_DEFAULT_PAGE);
 		}
-		// Stop here if needed
 		if (conf('no_internal_auth')) {
 			$def_page = conf('SITE_DEFAULT_PAGE');
 			if ($def_page) {
 				parse_str(substr($def_page, 3), $_tmp);
 				foreach ((array)$_tmp as $k => $v) {
-					$this-_get($k, $v);
+					$_GET[$k] = $v;
 				}
 			}
 			return false;
 		}
-		// Do not use auth for the spiders
 		if ($this->SPIDERS_DETECTION && conf('IS_SPIDER')) {
 			return false;
 		}
-		// Default stop-list
-		if (in_array($this->_get('object'), array('site_links'))) {
-			return false;
-		}
 		$auth_module_name = 'auth_'.(MAIN_TYPE_ADMIN ? 'admin' : 'user');
-		$auth_loaded_module_name = $this->load_class_file($auth_module_name, AUTH_MODULES_DIR);
+		$auth_loaded_module_name = $this->load_class_file($auth_module_name, 'classes/auth/');
 		if ($auth_loaded_module_name) {
 			$this->auth = new $auth_loaded_module_name();
-			$this->_set_module_conf($auth_module_name, $this->auth);
+			$this->set_module_conf($auth_module_name, $this->auth);
 			$this->auth->init();
 		}
 		if (!is_object($this->auth)) {
@@ -842,7 +859,6 @@ class yf_main {
 	* Include module file
 	*/
 	function include_module($path_to_module = '', $is_required = false) {
-#		$this->PROFILING && $this->_timing[] = array(microtime(true), __CLASS__, __FUNCTION__, $this->trace_string(), func_get_args());
 		if (DEBUG_MODE) {
 			$_time_start = microtime(true);
 		}
@@ -860,33 +876,33 @@ class yf_main {
 		// Here we do not want any errors if file is missing
 		} elseif ($file_exists) {
 			include_once ($path_to_module);
-		} else {
-// TODO: log E_USER_NOTICE when module not found
 		}
 		if (DEBUG_MODE) {
-			$path_prepared = strtolower(str_replace(DIRECTORY_SEPARATOR, '/', str_replace("\\", '/', $path_to_module)));
-			debug('include_files_exec_time::'.$path_prepared, round(microtime(true) - $_time_start, 5));
-			debug('include_files_trace::'.$path_prepared, $this->trace_string());
+			debug('included_files[]', array(
+				'path'		=> $path_to_module,
+				'exists'	=> (int)$file_exists,
+				'required'	=> (int)$is_required,
+				'size'		=> $file_exists ? filesize($path_to_module) : '',
+				'time'		=> round(microtime(true) - $_time_start, 5),
+				'trace'		=> $this->trace_string(),
+			));
 		}
 	}
 
 	/**
-	* Module class loader
+	* Module(class) loader, based on singleton pattern
 	* Initialize new class object or return reference to existing one
 	*/
 	function &init_class ($class_name, $custom_path = '', $params = '') {
+		$class_name = $this->get_class_name($class_name);
+		if (isset($this->modules[$class_name]) && is_object($this->modules[$class_name])) {
+			return $this->modules[$class_name];
+		}
 		if (empty($class_name)) {
 			return false;
 		}
-		if (!isset($this->modules)) {
-			$this->modules = array();
-		}
-		// Return reference to the module object
 		if ($class_name == 'main') {
 			return $this;
-		}
-		if (isset($this->modules[$class_name]) && is_object($this->modules[$class_name])) {
-			return $this->modules[$class_name];
 		}
 		$this->PROFILING && $this->_timing[] = array(microtime(true), __CLASS__, __FUNCTION__, $this->trace_string(), func_get_args());
 		// Strict installed modules check (currently only for user modules)
@@ -898,7 +914,6 @@ class yf_main {
 				$skip_array = array(
 					'rewrite',
 				);
-				// Check if given module name is installed correctly
 				if (!in_array($class_name, $skip_array) && !isset($this->installed_user_modules[$class_name])) {
 					return false;
 				}
@@ -907,21 +922,16 @@ class yf_main {
 					$this->installed_admin_modules = $this->get_data('admin_modules');
 				}
 				$skip_array = array();
-				// Check if given module name is installed correctly
 				if (!in_array($class_name, $skip_array)	&& !isset($this->installed_admin_modules[$class_name]) && !isset($this->installed_user_modules[$class_name])) {
 					return false;
 				}
 			}
 		}
 		$class_name_to_load = $this->load_class_file($class_name, $custom_path);
-		// Try to create instance of the class
 		if ($class_name_to_load) {
 			$this->modules[$class_name] = new $class_name_to_load($params);
-			// make this usable only for main() to save resources
-#			$this->_init_cur_user_info($this->modules[$class_name]);
-			$this->_set_module_conf($class_name, $this->modules[$class_name], $params);
+			$this->set_module_conf($class_name, $this->modules[$class_name], $params);
 		}
-		// Return reference to the module object
 		if (is_object($this->modules[$class_name])) {
 			return $this->modules[$class_name];
 		} else {
@@ -973,7 +983,6 @@ class yf_main {
 			return false;
 		}
 		$cur_hook_prefix = MAIN_TYPE_ADMIN ? YF_ADMIN_CLS_PREFIX : YF_SITE_CLS_PREFIX;
-		// By default thinking that class not exists
 		$loaded_class_name	= false;
 		// Site loaded class have top priority
 		$site_class_name = $cur_hook_prefix. $class_name;
@@ -992,7 +1001,6 @@ class yf_main {
 		if (substr($class_name, 0, strlen(YF_PREFIX)) === YF_PREFIX) {
 			$class_name = substr($class_name, strlen(YF_PREFIX));
 		}
-#		$this->PROFILING && $this->_timing[] = array(microtime(true), __CLASS__, __FUNCTION__, $this->trace_string(), func_get_args());
 		if (DEBUG_MODE) {
 			$_time_start = microtime(true);
 		}
@@ -1138,12 +1146,9 @@ class yf_main {
 	/**
 	* Main $_GET tasks handler
 	*/
-	function tasks($CHECK_IF_ALLOWED = false) {
+	function tasks($allowed_check = false) {
 		$this->PROFILING && $this->_timing[] = array(microtime(true), __CLASS__, __FUNCTION__, $this->trace_string(), func_get_args());
-		if ($this->CONSOLE_MODE) {
-			$this->NO_GRAPHICS = true;
-		}
-		return $this->init_class('graphics', 'classes/')->tasks($CHECK_IF_ALLOWED);
+		return $this->init_class('core_blocks', 'classes/')->tasks($allowed_check);
 	}
 
 	/**
@@ -1155,7 +1160,7 @@ class yf_main {
 			'[CLASS]'	=> $class_name,
 			'[METHOD]'	=> $method_name,
 			'[LANG]'	=> defined('DEFAULT_LANG') ? DEFAULT_LANG : conf('language'),
-			'[DOMAIN]'	=> defined('CUR_DOMAIN_LONG') ? CUR_DOMAIN_LONG : $this->_server('HTTP_HOST'),
+			'[DOMAIN]'	=> defined('CUR_DOMAIN_LONG') ? CUR_DOMAIN_LONG : $_SERVER['HTTP_HOST'],
 			'[CATEGORY]'=> conf('current_category'),
 			'[DEBUG]'	=> intval(DEBUG_MODE),
 		);
@@ -1166,7 +1171,6 @@ class yf_main {
 	* Try to return class method output
 	*/
 	function call_class_method ($class_name = '', $custom_path = '', $method_name = '', $method_params = '', $tpl_name = '', $silent = false, $use_cache = false, $cache_ttl = -1, $cache_key_override = '') {
-		// Check required params
 		if (!strlen($class_name) || !strlen($method_name)) {
 			return false;
 		}
@@ -1185,42 +1189,34 @@ class yf_main {
 				return $cached[0];
 			}
 		}
-		// Try to get object for the given $class_name
 		if ($class_name == 'main') {
-			$OBJ = $this;
+			$obj = $this;
 		} else {
-			$OBJ = $this->init_class($class_name, $custom_path, $method_params);
+			$obj = $this->init_class($class_name, $custom_path, $method_params);
+			if (!is_object($obj) && !$custom_path) {
+				$custom_path = 'classes/';
+				$obj = $this->init_class($class_name, $custom_path, $method_params);
+			}
 		}
-		if (!is_object($OBJ)) {
+		if (!is_object($obj)) {
 			if (!$silent) {
-				trigger_error('MAIN: module "'.$class_name.'" init failed'. (!empty($tpl_name) ? ' (template "'.$tpl_name.'"'.$this->modules['tpl']->_search_stpl_line($class_name, $method_name, $method_params, $tpl_name).')' : ''), E_USER_WARNING);
+				trigger_error('MAIN: module "'.$class_name.'" init failed'. (!empty($tpl_name) ? ' (template "'.$tpl_name.'"' : ''), E_USER_WARNING);
 			}
 			return false;
 		}
-		// Try to find given class method
-		if (!method_exists($OBJ, $method_name)) {
+		if (!method_exists($obj, $method_name)) {
 			if (!$silent) {
-				trigger_error('MAIN: no method "'.$method_name.'" in module "'.$class_name.'"'. (!empty($tpl_name) ? ' (template "'.$tpl_name.'"'.$this->modules['tpl']->_search_stpl_line($class_name, $method_name, $method_params, $tpl_name).')' : ''), E_USER_WARNING);
+				trigger_error('MAIN: no method "'.$method_name.'" in module "'.$class_name.'"'. (!empty($tpl_name) ? ' (template "'.$tpl_name.'")' : ''), E_USER_WARNING);
 			}
 			return false;
 		}
 		// Try to process method params (string like attrib1=value1;attrib2=value2)
 		if (is_string($method_params) && strlen($method_params)) {
-			$tmp_params		= explode(';', $method_params);
-			$method_params	= array();
-			// Convert params string into array
-			foreach ((array)$tmp_params as $v) {
-				$attrib_name = '';
-				$attrib_value = '';
-				if (false !== strpos($v, '=')) {
-					list($attrib_name, $attrib_value) = explode('=', trim($v));
-				}
-				$method_params[trim($attrib_name)] = trim($attrib_value);
-			}
+			$method_params = (array)_attrs_string2array($method_params);
 		}
-		$result = $OBJ->$method_name($method_params);
+		$result = $obj->$method_name($method_params);
 		if ($use_cache) {
-			$this->modules['cache']->put($cache_name, array($result));
+			$this->modules['cache']->set($cache_name, array($result));
 		}
 		return $result;
 	}
@@ -1232,43 +1228,11 @@ class yf_main {
 		if (DEBUG_MODE) {
 			$_time_start = microtime(true);
 		}
-		$body = '';
-		// Special widgets processing
-		$widget_name = false;
-		if (substr($method_name, 0, 8) == '_widget_') {
-			$widget_name = 'widget_'.conf('language').'_'. $class_name. '_'. substr($method_name, 8);
-			// Get widget params
-			if ($this->USE_SYSTEM_CACHE) {
-				if (!isset($this->widgets_params)) {
-					// Available params: allow_cache, cache_ttl, object, action
-					$this->widgets_params = $this->get_data('widgets_params');
-				}
-				$_cur_params = $this->widgets_params[$class_name][$method_name];
-			} else {
-				$_cur_params = $this->call_class_method($class_name, 'modules/', $method_name, array('describe' => '1'), $use_cache, $cache_ttl, $cache_key_override);
-			}
-			// First check if widget is for special _GET['object']
-			if (isset($_cur_params['object']) && $_cur_params['object'] && !in_array($this->_get('object'), explode(',', $_cur_params['object']))) {
-				return false;
-			}
-			if (isset($_cur_params['action']) && $_cur_params['action'] && !in_array($this->_get('action'), explode(',', $_cur_params['action']))) {
-				return false;
-			}
-		}
-		if ($widget_name && $this->USE_SYSTEM_CACHE) {
-			$cache_ttl = isset($_cur_params['cache_ttl']) && $_cur_params['cache_ttl'] ? (int)$_cur_params['cache_ttl'] : 0;
-			// Check if we allow to cache this widget
-			if ( ! (isset($_cur_params['allow_cache']) && !$_cur_params['allow_cache'])) {
-				$body = $this->modules['cache']->get($widget_name, $cache_ttl);
-				$body = $body[0];
-			}
-		}
-		if (empty($body)) {
-			$body = $this->call_class_method($class_name, in_array($class_name, array('graphics')) ? 'classes/' : '', $method_name, $method_params, $tpl_name, $silent, $use_cache, $cache_ttl, $cache_key_override);
-			if ($widget_name && $this->USE_SYSTEM_CACHE) {
-				$this->modules['cache']->put($widget_name, $body);
-			}
-		}
+		$body = $this->call_class_method($class_name, $path, $method_name, $method_params, $tpl_name, $silent, $use_cache, $cache_ttl, $cache_key_override);
+		$this->events->fire('main.execute', array(
+			'body' => &$body,
+			'args' => func_get_args()
+		));
 		if (DEBUG_MODE) {
 			debug('main_execute_block_time[]', array(
 				'class'		=> $class_name,
@@ -1276,6 +1240,7 @@ class yf_main {
 				'params'	=> $method_params,
 				'tpl_name'	=> $tpl_name,
 				'silent'	=> (int)$silent,
+				'size'		=> strlen($body),
 				'time'		=> round(microtime(true) - $_time_start, 5),
 				'trace'		=> $this->trace_string(),
 			));
@@ -1300,7 +1265,7 @@ class yf_main {
 	/**
 	* Set module properties from project conf array
 	*/
-	function _set_module_conf($module_name = '', &$MODULE_OBJ, $params = '') {
+	function set_module_conf($module_name = '', &$MODULE_OBJ, $params = '') {
 		// Stop here if project config not set or some other things missing
 		if (empty($module_name)	|| !is_object($MODULE_OBJ)) {
 			return false;
@@ -1332,62 +1297,81 @@ class yf_main {
 	/**
 	* Get named data array
 	*/
-	function get_data ($handler_name = '', $force_ttl = 0, $params = array()) {
+	function get_data ($name = '', $force_ttl = 0, $params = array()) {
 		if (DEBUG_MODE) {
 			$time_start = microtime(true);
 		}
-		$data_to_return = null;
-		if (empty($handler_name)) {
-			return $data_to_return;
+		if (empty($name)) {
+			return null;
 		}
+		$cache_used = false;
+		$data = null;
 		$cache_obj_available = is_object($this->modules['cache']);
 		if (!empty($this->USE_SYSTEM_CACHE) && $cache_obj_available) {
-			$data_to_return = $this->modules['cache']->get($handler_name, $force_ttl, $params);
+			$data = $this->modules['cache']->get($name, $force_ttl, $params);
+			$cache_used = true;
 		}
 		$no_cache = false;
-		if (empty($data_to_return) && !is_array($data_to_return)) {
-			$locale_handler_name = '';
-			if (strpos($handler_name, 'locale:') === 0) {
-				$handler_name = substr($handler_name, 7);
-				$locale_handler_name = $handler_name.'___'.conf('language');
-			}
-			if (!conf('data_handlers')) {
+		if (empty($data) && !is_array($data)) {
+			if (!$this->_data_handlers_loaded) {
 				$this->_load_data_handlers();
 			}
-			$handler_php_source = conf('data_handlers::'.$handler_name);
-			if (is_callable($handler_php_source)) {
-				$data_to_return = $handler_php_source($handler_name, $params);
-			} elseif (is_string($handler_php_source)) {
-				$data_to_return = eval( ($locale_handler_name ? '$locale="'.conf('language').'";' : ''). $handler_php_source. '; return isset($data) ? $data : null;' );
+			$name_to_save = $name;
+			$params_to_eval = '';
+			// Example: geo_regions, array(country => UA)  will be saved as geo_regions_countryUA
+			if (!empty($params) && is_array($params)) {
+				foreach ((array)$params as $k => $v) {
+					$name_to_save .= '_'.$k. $v;
+				}
 			}
-			if (!empty($this->USE_SYSTEM_CACHE) && !$no_cache && $cache_obj_available) {
-				$this->modules['cache']->put($locale_handler_name ? $locale_handler_name : $handler_name, $data_to_return);
+			$handler = conf('data_handlers::'.$name);
+			if (!empty($handler)) {
+				if (is_string($handler)) {
+					$data = include $handler;
+					if (is_callable($data)) {
+						$data = $data($params);
+					}
+				} elseif (is_callable($data)) {
+					$data = $data($params);
+				}
+				if (!$data) {
+					$data = array();
+				}
+			}
+			// Do not put empty data if database could not connected (not hiding mistakes with empty get_data)
+			if (empty($data) && is_object($this->db) && !$this->db->_connected) {
+				$no_cache = true;
+			}
+			if ($this->USE_SYSTEM_CACHE && !$no_cache && $cache_obj_available) {
+				$this->modules['cache']->set($name_to_save, $data);
 			}
 		}
 		if (DEBUG_MODE) {
 			debug('main_get_data[]', array(
-				'name'		=> $handler_name,
-				'data'		=> '<pre><small>'._prepare_html(substr(var_export($data_to_return, 1), 0, 1000)).'</small></pre>',
+				'name'		=> $name,
+				'real_name'	=> $name_to_save,
+				'data'		=> $data,
 				'params'	=> $params,
+				'cache_used'=> (int)$cache_used,
 				'force_ttl'	=> $force_ttl,
 				'time'		=> round(microtime(true) - $time_start, 5),
 				'trace'		=> $this->trace_string(),
 			));
 		}
-		return $data_to_return;
+		return $data;
 	}
 
 	/**
 	* Put named data array
 	*/
-	function put_data ($handler_name = '', $data = array()) {
+	function put_data ($name = '', $data = array()) {
 		if (empty($this->USE_SYSTEM_CACHE)) {
 			return false;
 		}
 		if (!is_object($this->modules['cache'])) {
 			return false;
 		}
-		return $this->modules['cache']->put($handler_name, $data);
+		return $this->modules['cache']->set($name, $data);
 	}
 
 	/**
@@ -1398,6 +1382,7 @@ class yf_main {
 		if (conf('data_handlers')) {
 			return false;
 		}
+		$this->events->fire('main.load_data_handlers');
 		$framework_rules_file_path = YF_PATH. 'share/data_handlers.php';
 		if (file_exists($framework_rules_file_path)) {
 			include ($framework_rules_file_path);
@@ -1410,6 +1395,7 @@ class yf_main {
 		if (file_exists($rules_file_path)) {
 			include ($rules_file_path);
 		}
+		$this->_data_handlers_loaded = true;
 	}
 
 	/**
@@ -1464,7 +1450,7 @@ class yf_main {
 		uksort($sites1, _sort_by_length);
 		uksort($sites2, _sort_by_length);
 		$sites = $sites1 + $sites2;
-		$found_site = $this->_find_site_path_best_match($sites, $this->_server('SERVER_ADDR'), $this->_server('SERVER_PORT'), $this->_server('HTTP_HOST'));
+		$found_site = $this->_find_site_path_best_match($sites, $_SERVER['SERVER_ADDR'], $_SERVER['SERVER_PORT'], $_SERVER['HTTP_HOST']);
 		return $found_site;
 	}
 
@@ -1507,7 +1493,7 @@ class yf_main {
 	/**
 	* Check and try to fix required constants
 	*/
-	function fix_required_constants() {
+	function init_constants() {
 		$this->PROFILING && $this->_timing[] = array(microtime(true), __CLASS__, __FUNCTION__, $this->trace_string(), func_get_args());
 		// Save current working directory (to restore it later when execute shutdown functions)
 		$this->_CWD = getcwd();
@@ -1518,22 +1504,22 @@ class yf_main {
 		if (DEBUG_MODE) {
 			ini_set('display_errors', 'stdout');
 		}
-		if (!is_null($this->_server('SERVER_ADDR'))) {
-			$this->_server('SERVER_ADDR', preg_replace('#[^0-9\.]+#', '', trim( $this->_server('SERVER_ADDR') )));
+		if (!is_null($_SERVER['SERVER_ADDR'])) {
+			$_SERVER['SERVER_ADDR'] = preg_replace('#[^0-9\.]+#', '', trim( $_SERVER['SERVER_ADDR'] ));
 		}
-		if (!is_null($this->_server('SERVER_PORT'))) {
-			$this->_server('SERVER_PORT', intval( $this->_server('SERVER_PORT') ));
+		if (!is_null($_SERVER['SERVER_PORT'])) {
+			$_SERVER['SERVER_PORT'] = intval( $_SERVER['SERVER_PORT'] );
 		}
-		if (!is_null($this->_server('HTTP_HOST'))) {
-			$this->_server('HTTP_HOST', strtolower(str_replace('..', '.', preg_replace('#[^0-9a-z\-\.]+#', '', trim( $this->_server('HTTP_HOST') )))));
+		if (!is_null($_SERVER['HTTP_HOST'])) {
+			$_SERVER['HTTP_HOST'] = strtolower(str_replace('..', '.', preg_replace('#[^0-9a-z\-\.]+#', '', trim( $_SERVER['HTTP_HOST'] ))));
 		}
-		if (!is_null($this->_server('REQUEST_URI'))) {
+		if (!is_null($_SERVER['REQUEST_URI'])) {
 			// Possible bug when apache sends full url into request_uri, like this: "http://test.dev/" instead of "/"
-			$p = parse_url($this->_server('REQUEST_URI'));
+			$p = parse_url($_SERVER['REQUEST_URI']);
 			if (isset($p['scheme']) || isset($p['host'])) {
-				$this->_server('REQUEST_URI', ($p['path'] ?: '/'). ($p['query'] ? '?'.$p['query'] : ''));
-				if ($this->_server('QUERY_STRING') != $p['query']) {
-					$this->_server('QUERY_STRING', $p['query']);
+				$_SERVER['REQUEST_URI'] = ($p['path'] ?: '/'). ($p['query'] ? '?'.$p['query'] : '');
+				if ($_SERVER['QUERY_STRING'] != $p['query']) {
+					$_SERVER['QUERY_STRING'] = $p['query'];
 					parse_str($p['query'], $_get);
 					foreach ((array)$_get as $k => $v) {
 						$_GET[$k] = $v;
@@ -1541,15 +1527,13 @@ class yf_main {
 				}
 			}
 		}
+		define('OS_WINDOWS', substr(PHP_OS, 0, 3) == 'WIN');
+
 		if (defined('DEV_MODE')) {
 			conf('DEV_MODE', DEV_MODE);
 		}
 		$this->DEV_MODE = conf('DEV_MODE');
 		$this->HOSTNAME = php_uname('n');
-		// Check if we are running in 'server' or 'cmd line' (or 'cli') mode
-		define('IS_CLI', php_sapi_name() == 'cli' || !$this->_server('PHP_SELF') ? 1 : 0);
-		// Get server OS
-		define('OS_WINDOWS', substr(PHP_OS, 0, 3) == 'WIN');
 		// Check required params
 		if (!defined('INCLUDE_PATH')) {
 			if ($this->CONSOLE_MODE) {
@@ -1574,17 +1558,33 @@ class yf_main {
 		if (!defined('REAL_PATH')) {
 			define('REAL_PATH', SITE_PATH);
 		}
-		// Define default framework path
+		// Framework root filesystem path
 		if (!defined('YF_PATH')) {
 			define('YF_PATH', dirname(PROJECT_PATH).'/yf/');
 		}
-		// Alias
-		if (!defined('YF_PATH')) {
-			define('YF_PATH', YF_PATH);
+		// Project-level application path, where will be other important subfolders like: APP_PATH.'www/', APP_PATH.'docs/', APP_PATH.'tests/',
+		if (!defined('APP_PATH')) {
+			define('APP_PATH', dirname(PROJECT_PATH).'/');
+		}
+		// Filesystem path for configuration files, including db_setup.php and so on
+		if (!defined('CONFIG_PATH')) {
+			define('CONFIG_PATH', APP_PATH.'config/');
+		}
+		// Filesystem path for various storage needs: logs, sessions, other files that should not be accessible from WEB
+		if (!defined('STORAGE_PATH')) {
+			define('STORAGE_PATH', APP_PATH.'storage/');
+		}
+		// Filesystem path to logs, usually should be at least one level up from WEB_PATH to be not accessible from web server
+		if (!defined('LOGS_PATH')) {
+			define('LOGS_PATH', STORAGE_PATH.'logs/');
+		}
+		// Uploads path should be used for various uploaded content accessible from WEB_PATH
+		if (!defined('UPLOADS_PATH')) {
+			define('UPLOADS_PATH', PROJECT_PATH.'uploads/');
 		}
 		// Set WEB_PATH (if not done yet)
 		if (!defined('WEB_PATH'))	{
-			$request_uri	= $this->_server('REQUEST_URI');
+			$request_uri	= $_SERVER['REQUEST_URI'];
 			$cur_web_path	= '';
 			if ($request_uri[strlen($request_uri) - 1] == '/') {
 				$cur_web_path	= substr($request_uri, 0, -1);
@@ -1593,8 +1593,8 @@ class yf_main {
 			}
 			$host = '';
 			$conf_domains = conf('DOMAINS');
-			if ($this->_server('HTTP_HOST')) {
-				$host = $this->_server('HTTP_HOST');
+			if ($_SERVER['HTTP_HOST']) {
+				$host = $_SERVER['HTTP_HOST'];
 			} elseif (is_array($conf_domains)) {
 				$host = (string) current($conf_domains);
 			} else {
@@ -1602,7 +1602,7 @@ class yf_main {
 			}
 			$this->web_path_was_not_defined = true;
 			define('WEB_PATH',
-				(($this->_server('HTTPS') || $this->_server('SSL_PROTOCOL')) ? 'https://' : 'http://')
+				(($_SERVER['HTTPS'] || $_SERVER['SSL_PROTOCOL']) ? 'https://' : 'http://')
 				.$host
 				.str_replace(array("\\",'//'), array('/','/'), (MAIN_TYPE_ADMIN ? dirname($cur_web_path) : $cur_web_path).'/')
 			);
@@ -1618,11 +1618,10 @@ class yf_main {
 			define('ADMIN_WEB_PATH', WEB_PATH.'admin/');
 		}
 		// Check if current page is called via AJAX call from javascript
-		conf('IS_AJAX', (strtolower($this->_server('HTTP_X_REQUESTED_WITH')) == 'xmlhttprequest' || !empty($_GET['ajax_mode'])) ? 1 : 0);
+		conf('IS_AJAX', (strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest' || !empty($_GET['ajax_mode'])) ? 1 : 0);
 
 		define('USER_MODULES_DIR', 'modules/');
 		define('ADMIN_MODULES_DIR', 'admin_modules/');
-		define('AUTH_MODULES_DIR', 'classes/auth/');
 		// Set console-specific options
 		if ($this->CONSOLE_MODE) {
 			ini_set('memory_limit', -1);
@@ -1634,7 +1633,7 @@ class yf_main {
 				}
 			}
 			// Parse console options into $_GET array
-			foreach ((array)$this->_server('argv') as $v) {
+			foreach ((array)$_SERVER['argv'] as $v) {
 				if (substr($v, 0, 2) != '--') {
 					continue;
 				}
@@ -1642,18 +1641,18 @@ class yf_main {
 				list($_name, $_val) = explode('=', $v);
 				$_name	= trim($_name);
 				if (strlen($_name)) {
-					$this->_get($_name, trim($_val));
+					$_GET[$_name] = trim($_val);
 				}
 			}
 		}
 		// Filter object and action from $_GET
-		if ($this->_get('action') == $this->_get('object')) {
-			$this->_get('action', '');
+		if ($_GET['action'] == $_GET['object']) {
+			$_GET['action'] = '';
 		}
-		$this->_get('object', str_replace(array('yf_','-'), array('','_'), preg_replace('/[^a-z_\-0-9]*/', '', strtolower(trim( $this->_get('object') )))));
-		$this->_get('action', str_replace('-', '_', preg_replace('/[^a-z_\-0-9]*/', '', strtolower(trim( $this->_get('action') )))));
-		if (!$this->_get('action')) {
-			$this->_get('action', defined('DEFAULT_ACTION') ? DEFAULT_ACTION : 'show');
+		$_GET['object'] = str_replace(array('yf_','-'), array('','_'), preg_replace('/[^a-z_\-0-9]*/', '', strtolower(trim( $_GET['object'] ))));
+		$_GET['action'] = str_replace('-', '_', preg_replace('/[^a-z_\-0-9]*/', '', strtolower(trim( $_GET['action'] ))));
+		if (!$_GET['action']) {
+			$_GET['action'] = defined('DEFAULT_ACTION') ? DEFAULT_ACTION : 'show';
 		}
 		if ($this->USER_INFO_DYNAMIC) {
 			module_conf('user_data', 'MODE', 'DYNAMIC');
@@ -1663,15 +1662,15 @@ class yf_main {
 	/**
 	* Try to set required PHP runtime params
 	*/
-	function set_required_php_params() {
+	function init_php_params() {
 		$this->PROFILING && $this->_timing[] = array(microtime(true), __CLASS__, __FUNCTION__, $this->trace_string(), func_get_args());
 		error_reporting(DEBUG_MODE ? $this->ERROR_REPORTING_DEBUG : $this->ERROR_REPORTING_PROD);
-		// Set path to PEAR
 		ini_set('url_rewriter.tags', '');
 		ini_set('magic_quotes_runtime',	0);
 		ini_set('magic_quotes_sybase', 0);
+		date_default_timezone_set(conf('timezone') ?: 'Europe/Kiev');
 		// Prepare GPC data. get_magic_quotes_gpc always return 0 starting from PHP 5.4+
-		if (get_magic_quotes_gpc()) {
+		if (function_exists('get_magic_quotes_gpc') && get_magic_quotes_gpc()) {
 			$_GET		= $this->_strip_quotes_recursive($_GET);
 			$_POST		= $this->_strip_quotes_recursive($_POST);
 			$_COOKIE	= $this->_strip_quotes_recursive($_COOKIE);
@@ -1685,6 +1684,7 @@ class yf_main {
 	function _send_main_headers($content_length = 0) {
 		$this->PROFILING && $this->_timing[] = array(microtime(true), __CLASS__, __FUNCTION__, $this->trace_string(), func_get_args());
 		return $this->init_class('graphics', 'classes/')->_send_main_headers($content_length);
+		$this->events->fire('main.http_headers');
 	}
 
 	/**
@@ -1699,35 +1699,27 @@ class yf_main {
 	}
 
 	/**
-	* Init user info
 	*/
-// TODO: make this usable only for main() to save resources
-	function _init_cur_user_info(&$OBJ) {
+	function _init_cur_user_info(&$obj) {
 		$this->PROFILING && $this->_timing[] = array(microtime(true), __CLASS__, __FUNCTION__, $this->trace_string(), array());
-		if (in_array($this->_get('object'), (array)$this->_auto_info_skip_modules)) {
-			return false;
-		}
-		if (in_array(str_replace('yf_', '', get_class($OBJ)), (array)$this->_auto_info_skip_modules)) {
-			return false;
-		}
 		if (MAIN_TYPE_ADMIN) {
-			$OBJ->USER_ID		= $this->_get('user_id');
-			$OBJ->ADMIN_ID		= (int)$this->_session('admin_id');
-			$OBJ->ADMIN_GROUP	= (int)$this->_session('admin_group');
+			$obj->USER_ID		= $_GET['user_id'];
+			$obj->ADMIN_ID		= (int)$_SESSION['admin_id'];
+			$obj->ADMIN_GROUP	= (int)$_SESSION['admin_group'];
 		} elseif (MAIN_TYPE_USER) {
-			$OBJ->USER_ID		= (int)$this->_session('user_id');
-			$OBJ->USER_GROUP	= (int)$this->_session('user_group');
+			$obj->USER_ID		= (int)$_SESSION['user_id'];
+			$obj->USER_GROUP	= (int)$_SESSION['user_group'];
 		}
-		// Select user details
-		if (isset($OBJ->USER_ID) && !empty($OBJ->USER_ID)) {
+		if (isset($obj->USER_ID) && !empty($obj->USER_ID)) {
 			if (!isset($this->_current_user_info)) {
-				$this->_current_user_info = user($OBJ->USER_ID);
+				$this->_current_user_info = user($obj->USER_ID);
 			}
-			$OBJ->_user_info = &$this->_current_user_info;
-			if (!$OBJ->USER_GROUP) {
-				$OBJ->USER_GROUP = $this->_current_user_info['group'];
+			$obj->_user_info = &$this->_current_user_info;
+			if (!$obj->USER_GROUP) {
+				$obj->USER_GROUP = $this->_current_user_info['group'];
 			}
 		}
+		$this->events->fire('main.user_info');
 	}
 
 	/**
@@ -1753,7 +1745,9 @@ class yf_main {
 		$this->PROFILING && $this->_timing[] = array(microtime(true), __CLASS__, __FUNCTION__, $this->trace_string(), func_get_args());
 		// Restore startup working directory
 		chdir($this->_CWD);
-		// Currently disabled by default
+
+		$this->events->fire('main.shutdown');
+
 		if ($this->CATCH_FATAL_ERRORS) {
 			$error = error_get_last();
 			if (in_array($error, array(E_ERROR, E_PARSE, E_CORE_ERROR, E_CORE_WARNING, E_COMPILE_ERROR, E_COMPILE_WARNING, E_USER_ERROR, E_RECOVERABLE_ERROR))) {
@@ -1762,75 +1756,45 @@ class yf_main {
 				echo $info;
 			}
 		}
-#		$this->_pack_php_code();
-#		foreach ((array)$this->_SHUTDOWN_CODE_ARRAY as $_cur_code) {
-#			eval($_cur_code);
-#		}
-	}
-
-	/**
-	* PHP code compression
-	*/
-	function _pack_php_code () {
-		$this->PROFILING && $this->_timing[] = array(microtime(true), __CLASS__, __FUNCTION__, $this->trace_string(), func_get_args());
-		if (!$this->AUTO_PACK_PHP_CODE || MAIN_TYPE_ADMIN) {
-			return false;
+		foreach ((array)$this->_SHUTDOWN_CODE_ARRAY as $_cur_code) {
+			call_user_func($_cur_code);
 		}
-		$OBJ = $this->init_class('project_packer', 'classes/');
 	}
 
-# TODO: in DEBUG_MODE log/cleanup/catch reads/writes to these methods
-// TODO: move them into separate class (input ?) and create shortcut ( ex: input()->get() )
-
 	/**
-	* Helper to get/set GET vars
 	*/
 	function _get($key = null, $val = null) {
-		if (!is_null($val)) {
-			$_GET[$key] = $val;
-		}
-		return $key === null ? $_GET : $_GET[$key];
+		return $this->init_class('input', 'classes/')->get($key, $val);
 	}
 
 	/**
-	* Helper to get/set POST vars
 	*/
 	function _post($key = null, $val = null) {
-		if (!is_null($val)) {
-			$_POST[$key] = $val;
-		}
-		return $key === null ? $_POST : $_POST[$key];
+		return $this->init_class('input', 'classes/')->post($key, $val);
 	}
 
 	/**
-	* Helper to get/set SESSION vars
 	*/
 	function _session($key = null, $val = null) {
-		if (!is_null($val)) {
-			$_SESSION[$key] = $val;
-		}
-		return $key === null ? $_SESSION : $_SESSION[$key];
+		return $this->init_class('input', 'classes/')->session($key, $val);
 	}
 
 	/**
-	* Helper to get/set SERVER vars
 	*/
 	function _server($key = null, $val = null) {
-		if (!is_null($val)) {
-			$_SERVER[$key] = $val;
-		}
-		return $key === null ? $_SERVER : $_SERVER[$key];
+		return $this->init_class('input', 'classes/')->server($key, $val);
 	}
 
 	/**
-	* Helper to get/set COOKIE vars
 	*/
 	function _cookie($key = null, $val = null) {
-		if (!is_null($val)) {
-# TODO: check and use main() settings for cookies
-			setcookie($key, $val);
-		}
-		return $key === null ? $_COOKIE : $_COOKIE[$key];
+		return $this->init_class('input', 'classes/')->cookie($key, $val);
+	}
+
+	/**
+	*/
+	function _env($key = null, $val = null) {
+		return $this->init_class('input', 'classes/')->env($key, $val);
 	}
 
 	/**
@@ -1844,25 +1808,70 @@ class yf_main {
 	* Checks whether current page was requested with AJAX
 	*/
 	function is_ajax() {
-		return conf('IS_AJAX');
+		return (bool)conf('IS_AJAX');
+	}
+
+	/**
+	* Checks whether current page was requested from console
+	*/
+	function is_console() {
+		return (bool)$this->CONSOLE_MODE;
+	}
+
+	/**
+	* Checks whether current page is a redirect
+	*/
+	function is_redirect() {
+		return (bool)$this->_IS_REDIRECTING;
+	}
+
+	/**
+	* Checks whether current page is not a special page (no ajax, no redirects, no console, no post, etc)
+	*/
+	function is_common_page() {
+		return !($this->is_post() || $this->is_ajax() || $this->is_redirect() || $this->is_console());
+	}
+
+	/**
+	* Return class name of the object, stripping all YF-related prefixes
+	* Needed to ensure singleton pattern and extending classes with same name
+	*/
+	function get_class_name($name) {
+		if (is_object($name)) {
+			$name = get_class($name);
+		}
+		if (strpos($name, YF_PREFIX) === 0) {
+			$name = substr($name, strlen(YF_PREFIX));
+		} elseif (strpos($name, YF_ADMIN_CLS_PREFIX) === 0) {
+			$name = substr($name, strlen(YF_ADMIN_CLS_PREFIX));
+		} elseif (strpos($name, YF_SITE_CLS_PREFIX) === 0) {
+			$name = substr($name, strlen(YF_SITE_CLS_PREFIX));
+		}
+		return $name;
 	}
 
 	/**
 	*/
-	function event_subscribe($name, $func, $params = array()) {
-// TODO: events system
+	function extend($module, $name, $func) {
+		$module = $this->get_class_name($module);
+		$this->_extend[$module][$name] = $func;
 	}
 
 	/**
 	*/
-	function event_fire($name, $extra = array()) {
-// TODO: events system
-	}
-
-	/**
-	*/
-	function event_find_hooks() {
-// TODO: will search through active modules for _event_hook() methods, where class/method can subscribe to any events
-// TODO: events system
+	function extend_call($that, $name, $args, $return_obj = false) {
+		$module = $this->get_class_name($that);
+		$func = null;
+		if (isset( $that->_extend[$name] )) {
+			$func = $that->_extend[$name];
+		} elseif (isset( $this->_extend[$module][$name] )) {
+			$func = $this->_extend[$module][$name];
+		}
+		if ($func) {
+			$out = $func($args[0], $args[1], $args[2], $args[3], $that);
+			return $return_obj ? $that : $out;
+		}
+		trigger_error($module.': No method '.$name, E_USER_WARNING);
+		return $return_obj ? $that : false;
 	}
 }

@@ -1,644 +1,523 @@
 <?php
 
 /**
-* Cache handler
-* 
+* Caching layer
+*
 * @package		YF
 * @author		YFix Team <yfix.dev@gmail.com>
 * @version		1.0
 */
 class yf_cache {
 
-	/** @var array config for file driver @conf_skip */
-	public $_file_conf				= array(
-		'auto_header'	=> "<?php\n",
-		'auto_footer'	=> "\n?>",
-		'file_prefix'	=> 'cache_',
-		'file_ext'		=> '.php',
-	);
-	/** @var int Cache files TimeToLive value (in seconds) */
-	public $FILES_TTL				= 3600;
-	/** @var int Add random value for each entry TTL (to avoid one-time cache invalidation problems) */
-	public $RANDOM_TTL_ADD			= true;
-	/** @var string Cache rules file */
-	public $RULES_FILE				= 'cache_rules.php';
-	/** @var bool Allow or not custom rules (not found in rules array) */
-	public $ALLOW_CUSTOM_RULES		= true;
-	/** @var bool Auto-create cache folder */
-	public $AUTO_CREATE_CACHE_DIR	= true;
-	/** @var bool Include cache files (or simply read as string) */
-	public $INCLUDE_CACHE_FILES	= true;
-	/** @var string Cache driver enum('','auto','file','eaccelerator','apc','xcache','memcache') */
-	public $DRIVER					= 'file';
+	/** @var int Cache entries time-to-live (in seconds) */
+	public $TTL					= 3600;
+	/** @var string Cache driver to use */
+	public $DRIVER				= 'memcache';
 	/** @var string Namespace for drivers other than 'file' */
-	public $CACHE_NS				= '';
-	/** @var array internal @conf_skip */
-	public $MEMCACHE_DEF_PARAMS	= array(
-		'port'		=> 11211,
-		'host'		=> '127.0.0.1', // !!! DO NOT USE 'localhost' on Ubuntu 10.04 (and maybe others) due to memcached bug
-		'persistent'=> false,
-	);
-	/** @var object internal @conf_skip */
-	public $_memcache				= null;
-	/** @var bool */
+	public $CACHE_NS			= '';
+	/** @var bool Allows to turn off cache at any moment. Useful for unit tests and complex situations. */
+	public $NO_CACHE			= false;
+	/** @var bool Forcing to delete elements */
 	public $FORCE_REBUILD_CACHE	= false;
-	/** @var array symbols to escape for debug */
-	public $_debug_escape_symbols = array(
-		'{'	=> '&#123;',
-		'}'	=> '&#125;',
-		"\\"=> '&#92;',
-		'(' => '&#40;',
-		')' => '&#41;',
-		'?' => '&#63;',
-	);
-	/** @var bool We need this instead of global constant DEBUG_MODE to be able to early init cache when main is still not available */
-	public $DEBUG_MODE	= false;
-	/** @var int Max number of items to log when DEBUG_MODE is enabled, this limit needed to prevent stealing all RAM 
-		when we have high number of cache entries at once. Applied separately for 'get', 'set', 'refresh'.
-	*/
-	public $LOG_MAX_ITEMS	= 200;
-
-// TODO: connect plugins, stored inside classes/cache/*
-
-	/**
-	* Framework constructor
-	*/
-	function _init ($params = array()) {
-		$conf_mc_host = conf('MEMCACHED_HOST');
-		if ($conf_mc_host) {
-			$this->MEMCACHE_DEF_PARAMS['host'] = $conf_mc_host;
-		}
-		$conf_mc_port = conf('MEMCACHED_PORT');
-		if ($conf_mc_host) {
-			$this->MEMCACHE_DEF_PARAMS['port'] = $conf_mc_port;
-		}
-		// Cache namespace need to be unique, especially when using memcached shared between several projects
-#		$this->CACHE_NS = 'core_'.intval(abs(crc32(defined('INCLUDE_PATH') ? INCLUDE_PATH : __FILE__)));
-		$conf_cache_ns = conf('CACHE_NS');
-		if ($conf_cache_ns) {
-			$this->CACHE_NS = $conf_cache_ns;
-		}
-		$this->_main_exists = (isset($GLOBALS['main']) && method_exists($GLOBALS['main'], 'init_class'));
-		if (defined('DEBUG_MODE')) {
-			$this->DEBUG_MODE = DEBUG_MODE;
-		}
-		if (conf('USE_CACHE') === null) {
-			if (defined('USE_CACHE')) {
-				conf('USE_CACHE', USE_CACHE);
-			}
-			// By default we have cache enabled
-			$use_cache = true;
-			if (isset($GLOBALS['PROJECT_CONF']['main']['USE_SYSTEM_CACHE'])) {
-				$use_cache = (bool)$GLOBALS['PROJECT_CONF']['main']['USE_SYSTEM_CACHE'];
-			}
-// TODO: add DEBUG_MODE checking here to not allow no_cache attacks
-// TODO: add auth checking like debug auth
-			if ($_GET['no_core_cache'] || $_GET['no_cache']) {
-				$use_cache = false;
-			}
-			conf('USE_CACHE', $use_cache);
-		}
-		define('CORE_CACHE_DIR', INCLUDE_PATH. 'core_cache/');
-		// Singleton pattern, prevents double cache init overhead when called without main and then with main class
-		if (isset($this->_init_complete)) {
-			return true;
-		}
-		$cache_systems = array();
-		if (function_exists('eaccelerator_get')) {
-			$cache_systems[] = 'eaccelerator';
-		}
-		if (function_exists('apc_fetch')) {
-			$cache_systems[] = 'apc';
-		}
-		if (function_exists('xcache_get')) {
-			$cache_systems[] = 'xcache';
-		}
-		if (class_exists('Memcache') || class_exists('Memcached')) {
-			$cache_systems[] = 'memcache';
-		}
-		$cache_systems[] = 'file';
-		$required_cache = isset($params['driver']) ? $params['driver'] : $this->DRIVER;
-		if (!$required_cache) {
-			$required_cache = 'file';
-		}
-		if (count($cache_systems)) {
-			if ($required_cache == 'auto') {
-				$this->DRIVER = array_shift($cache_systems);
-			} elseif (in_array($required_cache, $cache_systems)) {
-				$this->DRIVER = $required_cache;
-			} else {
-				$this->DRIVER = 'file';
-			}
-		}
-		if ($this->DRIVER == 'memcache') {
-			$this->_memcache = null;
-			$mc_obj = null;
-			if (class_exists('Memcached')) {
-				$mc_obj = new Memcached();
-			} elseif (class_exists('Memcache')) {
-				$mc_obj = new Memcache();
-			}
-			if (is_object($mc_obj)) {
-				$mc_params = (isset($params['memcache']) && !empty($params['memcache'])) 
-					? (is_array($params['memcache']) ? $params['memcache'] : array($params['memcache'])) 
-					: array($this->MEMCACHE_DEF_PARAMS);
-				$failed = true;
-				foreach ((array)$mc_params as $server) {
-					if (!is_array($server) || !isset($server['host'])) {
-						continue;
-					}
-					$server['port'] = isset($server['port']) ? (int)$server['port'] : 11211;
-					$server['persistent'] = isset($server['persistent']) ? (bool) $server['persistent'] : true;
-					if ($mc_obj->addServer($server['host'], $server['port'], $server['persistent'])) {
-						$failed = false;
-					}
-				}
-			}
-			if (is_object($mc_obj)) {
-				$this->_memcache = $mc_obj;
-			} else {
-				$this->_memcache = null;
-				$this->DRIVER = 'file';
-			}
-		}
-		if ($this->DRIVER == 'memcache') {
-			$this->_memcache_new_extension = method_exists($this->_memcache, 'getMulti');
-		}
-		if ($this->DRIVER == 'file' && !file_exists(CORE_CACHE_DIR) && $this->AUTO_CREATE_CACHE_DIR) {
-// TODO: add 1-2 levels of subdirs to store 100 000+ entries easily in files (no matters when use memcached)
-			mkdir(CORE_CACHE_DIR, 0777, true);
-		}
-		$this->_init_complete = true;
-	}
+	/** @var bool Add random value for each entry TTL (to avoid one-time cache invalidation problems) */
+	public $RANDOM_TTL_ADD		= true;
+	/** @var bool Force cache class to generate unique namespace, based on project_path. Usually needed to separate projects within same cache storage (memcached as example) */
+	public $AUTO_CACHE_NS		= false;
 
 	/**
 	* Catch missing method call
 	*/
-	function __call($name, $arguments) {
+	function __call($name, $args) {
+		$self = main()->get_class_name($this);
+		$func = null;
+		if (isset( $this->_extend[$name] )) {
+			$func = $this->_extend[$name];
+		} elseif (isset( main()->_extend[$self][$name] )) {
+			$func = main()->_extend[$self][$name];
+		}
+		if ($func) {
+			return $func($args[0], $args[1], $args[2], $args[3], $this);
+		}
+		// Support for driver-specific methods
+		if (is_object($this->_driver)) {
+			return call_user_func_array(array($this->_driver, $name), $args);
+		}
 		trigger_error(__CLASS__.': No method '.$name, E_USER_WARNING);
 		return false;
 	}
 
 	/**
-	* Run init from main class if that exists
 	*/
-	function _init_from_main () {
-		// We need this uplicated piece of code to ensure cache will work after early init without main class and after that
-		$this->_main_exists = (method_exists(main(), 'init_class'));
-		if (defined('DEBUG_MODE')) {
-			$this->DEBUG_MODE = DEBUG_MODE;
+	function __clone() {
+		foreach ((array)get_object_vars($this) as $k => $v) {
+			if ($k[0] == '_') {
+				unset($this->$k);
+			}
 		}
-		$this->FORCE_REBUILD_CACHE = false;
-		if ($this->_main_exists && main()->CACHE_CONTROL_FROM_URL && $_GET['rebuild_core_cache']) {
+	}
+
+	/**
+	* Framework constructor
+	*/
+	function _init ($params = array()) {
+		if (isset($this->_init_complete)) {
+			return true;
+		}
+		$this->_init_settings();
+		$this->_connect($params);
+		$this->_init_complete = true;
+	}
+
+	/**
+	*/
+	function _init_settings ($params = array()) {
+		// backwards compatibility
+		if ($this->FILES_TTL) {
+			$this->TTL = $this->FILES_TTL;
+		}
+		$conf_cache_ns = conf('CACHE_NS');
+		// Cache namespace need to be unique, especially when using memcached shared between several projects
+		if (!$conf_cache_ns && !$this->CACHE_NS && $this->AUTO_CACHE_NS) {
+			$this->CACHE_NS = substr(md5(PROJECT_PATH), 0, 8).'_';
+		}
+		if ($conf_cache_ns) {
+			$this->CACHE_NS = $conf_cache_ns;
+		}
+		// backwards compatibility
+		if (defined('USE_CACHE') && ! USE_CACHE) {
+			$this->NO_CACHE = true;
+		}
+		if (!main()->USE_SYSTEM_CACHE) {
+			$this->NO_CACHE = true;
+		}
+		if (($_GET['no_core_cache'] || $_GET['no_cache']) && $this->_url_action_allowed('no_cache')) {
+			$this->NO_CACHE = true;
+		}
+		if (($_GET['refresh_cache'] || $_GET['rebuild_core_cache']) && $this->_url_action_allowed('refresh_cache')) {
 			$this->FORCE_REBUILD_CACHE = true;
 		}
-		// Try to load data handlers array
-		if ($this->_main_exists && !conf('data_handlers')) {
-			main()->_load_data_handlers();
+		$this->FORCE_REBUILD_CACHE = false;
+	}
+
+	/**
+	* Callback that can be overriden to ensure security when allowing url params like no_cache, refresh_cache
+	* We can add DEBUG_MODE checking here to not allow refresh_cache attacks, maybe add check for: conf('cache_refresh_token', 'something_random'), main()->CACHE_CONTROL_FROM_URL
+	*/
+	function _url_action_allowed ($action = '') {
+		$actions = array('no_cache', 'refresh_cache');
+		$callback = conf('cache_url_action_allowed');
+		if (is_callable($callback)) {
+			return (bool)$callback($action);
 		}
-		if (defined('DEBUG_MODE')) {
-			$this->DEBUG_MODE = DEBUG_MODE;
+		return true;
+	}
+
+	/**
+	*/
+	function _connect ($params = array()) {
+		if (!$this->DRIVER) {
+			return false;
 		}
+		if (isset($this->_tried_to_connect)) {
+			return $this->_driver;
+		}
+		$this->_driver = null;
+		$this->_driver_ok = false;
+		$driver = $this->_set_current_driver($params);
+		if ($driver) {
+			$this->_driver = _class('cache_driver_'.$driver, 'classes/cache/');
+			$this->_driver_ok = $this->_driver->is_ready();
+			$implemented = array();
+			foreach (get_class_methods($this->_driver) as $method) {
+				if ($method[0] != '_') {
+					$implemented[$method] = $method;
+				}
+			}
+			$this->_driver->implemented = $implemented;
+			$this->_driver->_parent = $this;
+		} else {
+			trigger_error('CACHE: empty driver name, will not use cache', E_USER_WARNING);
+		}
+		$this->_tried_to_connect = true;
+		return $this->_driver;
+	}
+
+	/**
+	*/
+	function _set_current_driver ($params = array()) {
+		$avail_drivers = $this->_get_avail_drivers_list();
+		$driver = '';
+		$want = isset($params['driver']) ? $params['driver'] : $this->DRIVER;
+		if (!$want || $want == 'auto') {
+			$want = 'memcache';
+		}
+		if (isset($avail_drivers[$want])) {
+			$driver = $want;
+		}
+		$this->DRIVER = $driver;
+		return $driver;
+	}
+
+	/**
+	*/
+	function _get_avail_drivers_list () {
+		$paths = array(
+			'project'	=> PROJECT_PATH. 'classes/cache/',
+			'yf_core'	=> YF_PATH. 'classes/cache/',
+			'yf_plugins'=> YF_PATH. 'plugins/*/classes/cache/',
+		);
+		$prefix = 'cache_driver_';
+		$suffix = '.class.php';
+		$plen = strlen($prefix);
+		$slen = strlen($suffix);
+		$drivers = array();
+		foreach ($paths as $path) {
+			foreach (glob($path.'*'.$prefix.'*'.$suffix) as $f) {
+				$f = basename($f);
+				$name = substr($f, strpos($f, $prefix) + $plen, -$slen);
+				if ($name) {
+					$drivers[$name] = $name;
+				}
+			}
+		}
+		return $drivers;
 	}
 
 	/**
 	* Get data from cache
 	*/
-	function get ($cache_name = '', $force_ttl = 0, $params = array()) {
-		if (empty($cache_name)) {
+	function get ($name, $force_ttl = 0, $params = array()) {
+		if (!$this->_driver_ok) {
+			return false;
+		}
+		if (empty($name) || $this->NO_CACHE) {
 			return false;
 		}
 		if ($this->FORCE_REBUILD_CACHE) {
-			return $this->refresh($cache_name, true);
-		}
-		if ($this->DEBUG_MODE) {
-			$time_start = microtime(true);
-		}
-		// Check if handler is locale-specific
-		$locale_cache_name = '';
-		if (strpos($cache_name, 'locale:') === 0) {
-			$cache_name = substr($cache_name, 7);
-			$locale_cache_name = $cache_name.'___'.conf('language');
-		}
-		$key_name = $locale_cache_name ? $locale_cache_name : $cache_name;
-		$key_name_ns = $this->CACHE_NS. $key_name;
-		if ($this->DRIVER == 'memcache') {
-			if (isset($this->_memcache)) {
-				$result = $this->_memcache->get($key_name_ns);
-			} else {
-				$this->DRIVER = 'file';
-			}
-		}
-		if ($this->DRIVER == 'file') {
-			$result = $this->_get_cache_file(CORE_CACHE_DIR. $this->_file_conf['file_prefix']. $key_name. $this->_file_conf['file_ext'], $force_ttl);
-		} elseif ($this->DRIVER == 'eaccelerator') {
-			$result = eaccelerator_get($key_name_ns);
-		} elseif ($this->DRIVER == 'apc') {
-			$result = apc_fetch($key_name_ns);
-		} elseif ($this->DRIVER == 'xcache') {
-			$result = xcache_get($key_name_ns);
-		}
-		if ($this->DRIVER != 'file' && is_string($result)) {
-			$try_unpack = unserialize($result);
-			if ($try_unpack || substr($result, 0, 2) == 'a:') {
-				$result = $try_unpack;
-			}
-		}
-		if ($this->DEBUG_MODE) {
-			$all_debug = debug('cache_get');
-			$debug_index = count($all_debug);
-			if ($debug_index < $this->LOG_MAX_ITEMS) {
-				debug('cache_get::'.$debug_index, array(
-					'name'		=> $cache_name,
-					'data'		=> '<pre><small>'._prepare_html(substr(var_export($result, 1), 0, 1000)).'</small></pre>',
-					'driver'	=> $this->DRIVER,
-					'params'	=> $params,
-					'force_ttl'	=> $force_ttl,
-					'time'		=> round(microtime(true) - $time_start, 5),
-					'trace'		=> $this->trace_string(),
-				));
-			}
-		}
-		if (!conf('USE_CACHE')) {
+			$this->del($name, true);
 			return false;
 		}
-// TODO: add DEBUG_MODE checking here to not allow refresh_cache attacks
-// TODO: maybe add check for: conf('cache_refresh_token', 'something_random')
-		if ($_GET['refresh_cache']) {
+		if (DEBUG_MODE) {
+			$time_start = microtime(true);
+		}
+		$key_name_ns = $this->CACHE_NS. $name;
+
+		$result = $this->_driver->get($key_name_ns, $force_ttl, $params);
+
+		DEBUG_MODE && debug('cache_'.__FUNCTION__.'[]', array(
+			'name'		=> $name,
+			'name_real'	=> $key_name_ns,
+			'data'		=> $result,
+			'driver'	=> $this->DRIVER,
+			'params'	=> $params,
+			'force_ttl'	=> $force_ttl,
+			'time'		=> round(microtime(true) - $time_start, 5),
+			'trace'		=> main()->trace_string(),
+		));
+		if ($_GET['refresh_cache'] && $this->_url_action_allowed('refresh_cache')) {
 			return false;
 		}
 		return $result;
 	}
 
 	/**
-	* Put data into cache (alias for 'put')
+	* Set data into cache
 	*/
-	function set ($cache_name = '', $data = null, $TTL = 0) {
-		return $this->put($cache_name, $data, $TTL);
-	}
-
-	/**
-	* Put data into cache
-	*/
-	function put ($cache_name = '', $data = null, $TTL = 0) {
-		if (!$TTL) {
-			$TTL = $this->FILES_TTL;
+	function set ($name, $data, $ttl = 0) {
+		if (!$this->_driver_ok) {
+			return false;
 		}
-		// Add random value for each entry TTL (to avoid 'at once' cache invalidation problems)
+		if ($this->NO_CACHE || $this->_no_cache[$name]) {
+			return false;
+		}
+		if (is_array($name)) {
+			return $this->multi_set($name, $data);
+		}
+		if (DEBUG_MODE) {
+			$time_start = microtime(true);
+		}
+		$ttl = intval($ttl ?: $this->TTL);
 		if ($this->RANDOM_TTL_ADD) {
-			$TTL += mt_rand(1, 15);
+			$ttl += mt_rand(1, 15);
 		}
-		if ($this->DEBUG_MODE) {
-			$time_start = microtime(true);
-		}
-		// Check if handler is locale-specific
-		if (strpos($cache_name, 'locale:') === 0) {
-			$cache_name	= substr($cache_name, 7);
-			$locale_cache_name = $cache_name.'___'.conf('language');
-		}
-		$key_name = $locale_cache_name ? $locale_cache_name : $cache_name;
-		$key_name_ns = $this->CACHE_NS. $key_name;
-		// Stop here if custom rules not allowed
-		if (!$this->ALLOW_CUSTOM_RULES && !conf('data_handlers::'.$cache_name)) {
+		$key_name_ns = $this->CACHE_NS. $name;
+		$result = $this->_driver->set($key_name_ns, $data, $ttl);
+
+		DEBUG_MODE && debug('cache_'.__FUNCTION__.'[]', array(
+			'name'		=> $name,
+			'name_real'	=> $key_name_ns,
+			'data'		=> $data,
+			'driver'	=> $this->DRIVER,
+			'ttl'		=> $ttl,
+			'time'		=> round(microtime(true) - $time_start, 5),
+			'trace'		=> main()->trace_string(),
+		));
+		return $result;
+	}
+
+	/**
+	* Delete selected cache entry
+	*/
+	function del ($name) {
+		if (!$this->_driver_ok) {
 			return false;
 		}
-		if (is_null($data)) {
-			$data = $this->_process_rule($cache_name, $locale_cache_name ? 1 : 0);
+		if (is_array($name)) {
+			return $this->multi_del($name);
 		}
-		// Do not put empty data if database could not connect
-		if (empty($data) && is_object($GLOBALS['db']) && !$GLOBALS['db']->_connected) {
-			return false;
-		}
-		if ($this->_no_cache[$cache_name]) {
-			return true;
-		}
-		if ($this->DRIVER != 'file') {
-			$data_to_put = is_array($data) ? serialize($data) : $data;
-		}
-		if ($this->DRIVER == 'memcache') {
-			if (isset($this->_memcache)) {
-				// Solved set() trouble with many servers.
-				// http://www.php.net/manual/ru/function.memcache-set.php#84032
-				if ($this->_memcache_new_extension) {
-					if (!$this->_memcache->replace($key_name_ns, $data_to_put, $TTL)) {
-						$result = $this->_memcache->set($key_name_ns, $data_to_put, $TTL);
-					}
-				} else {
-					if (!$this->_memcache->replace($key_name_ns, $data_to_put, /*MEMCACHE_COMPRESSED*/ null, $TTL)) {
-						$result = $this->_memcache->set($key_name_ns, $data_to_put, /*MEMCACHE_COMPRESSED*/null, $TTL);
-					}
-				}
-			} else {
-				$this->DRIVER = 'file';
-			}
-		}
-		if ($this->DRIVER == 'file') {
-			$result = $this->_put_cache_file($data, CORE_CACHE_DIR. $this->_file_conf['file_prefix']. $key_name. $this->_file_conf['file_ext']);
-		} elseif ($this->DRIVER == 'eaccelerator') {
-			$result = eaccelerator_put($key_name_ns, $data_to_put, $TTL);
-		} elseif ($this->DRIVER == 'apc') {
-			$result = apc_store($key_name_ns, $data_to_put, $TTL);
-		} elseif ($this->DRIVER == 'xcache') {
-			$result = xcache_set($key_name_ns, $data_to_put, $TTL);
-		}
-		if ($this->DEBUG_MODE) {
-			$all_debug = debug('cache_set');
-			$debug_index = count($all_debug);
-			if ($debug_index < $this->LOG_MAX_ITEMS) {
-				debug('cache_set::'.$debug_index, array(
-					'name'		=> $cache_name,
-					'data'		=> '<pre><small>'._prepare_html(substr(var_export($data, 1), 0, 1000)).'</small></pre>',
-					'driver'	=> $this->DRIVER,
-					'time'		=> round(microtime(true) - $time_start, 5),
-					'trace'		=> $this->trace_string(),
-				));
-			}
-		}
-		return $result;
-	}
-
-	/**
-	* Get several cache entries at once (speedup when use memcached)
-	*/
-// TODO: optimize me for memcache, using native getMultiByKey() method
-	function multi_get ($cache_names = array(), $force_ttl = 0, $params = array()) {
-		$result = array();
-		foreach ((array)$cache_names as $cache_name) {
-			$result[$cache_name] = $this->get($cache_name, $force_ttl, $params);
-		}
-		return $result;
-	}
-
-	/**
-	* Set several cache entries at once (speedup when use memcached)
-	*/
-// TODO: optimize me for memcache, using native setMultiByKey() method
-	function multi_set ($cache_data = array(), $TTL = 0) {
-		$result = array();
-		foreach ((array)$cache_data as $cache_name => $data) {
-			$result[$cache_name] = $this->put($cache_name, $data, $TTL);
-		}
-		return $result;
-	}
-
-	/**
-	* Del several cache entries at once (speedup when use memcached)
-	*/
-// TODO: optimize me for memcache
-	function multi_del ($cache_data = array()) {
-		$result = array();
-		foreach ((array)$cache_data as $cache_name) {
-			$result[$cache_name] = $this->del($cache_name);
-		}
-		return $result;
-	}
-
-	/**
-	* Update selected cache entry
-	*/
-	function refresh ($cache_name = '', $force_clean = false) {
-		if (is_array($cache_name)) {
-			foreach ((array)$cache_name as $name) {
-				$result[$name] = $this->_refresh($name, $force_clean);
-			}
-		} else {
-			$result = $this->_refresh($cache_name, $force_clean);
-		}
-		return $result;
-	}
-
-	/**
-	*/
-	function _refresh ($cache_name = '', $force_clean = false) {
-		if ($this->DEBUG_MODE) {
+		if (DEBUG_MODE) {
 			$time_start = microtime(true);
 		}
-		// Check if handler is locale-specific
-		if (strpos($cache_name, 'locale:') === 0) {
-			$cache_name	= substr($cache_name, 7);
-			$locale_cache_name = $cache_name.'___'.conf('language');
-			// get available locales
-			$locales = array();
-			$locale_obj = _class('locale');
-			if (is_object($obj)) {
-				$locales = array_keys((array)$locale_obj->LANGUAGES);
-			}
-		}
-		$key_name = $locale_cache_name ? $locale_cache_name : $cache_name;
-		$key_name_ns = $this->CACHE_NS. $key_name;
-		$need_touch = (bool)conf('data_handlers::'.$cache_name);
-		if ($this->DRIVER == 'memcache') {
-			if (isset($this->_memcache)) {
-				$result = $this->_memcache->delete($key_name_ns, 0);
-			} else {
-				$this->DRIVER = 'file';
-			}
-		}
-		if ($this->DRIVER == 'file') {
-			// Not locale specific
-			if (empty($locales)) {
-				$cache_file = CORE_CACHE_DIR. $this->_file_conf['file_prefix']. $cache_name. $this->_file_conf['file_ext'];
-				if (file_exists($cache_file)) {
-					if ($force_clean) {
-						unlink($cache_file);
-					} elseif ($need_touch) {
-						@touch($cache_file, time() - $this->FILES_TTL * 2);
-					}
-				} elseif (!$force_clean) {
-					$this->put($cache_name);
-				}
-			}
-			// Locale-specific
-			foreach ((array)$locales as $_cur_locale) {
-				$cache_file = CORE_CACHE_DIR. $this->_file_conf['file_prefix']. $cache_name.'___'.$_cur_locale. $this->_file_conf['file_ext'];
-				if (file_exists($cache_file)) {
-					if ($force_clean) {
-						unlink($cache_file);
-					} elseif ($need_touch) {
-						@touch($cache_file, time() - $this->FILES_TTL * 2);
-					}
-				}
-			}
-		} elseif ($this->DRIVER == 'eaccelerator') {
-			$result = eaccelerator_rm($key_name_ns);
-		} elseif ($this->DRIVER == 'apc') {
-			$result = apc_delete($key_name_ns);
-		} elseif ($this->DRIVER == 'xcache') {
-			$result = xcache_unset($key_name_ns);
-		}
-		if ($this->DEBUG_MODE) {
-			$all_debug = debug('cache_refresh');
-			$debug_index = count($all_debug);
-			if ($debug_index < $this->LOG_MAX_ITEMS) {
-				debug('cache_refresh::'.$debug_index, array(
-					'name'			=> $cache_name,
-					'force_clean'	=> $force_clean,
-					'driver'		=> $this->DRIVER,
-					'time'			=> microtime(true) - $time_start,
-				));
-			}
-		}
+		$key_name_ns = $this->CACHE_NS. $name;
+		$result = $this->_driver->del($key_name_ns);
+
+		DEBUG_MODE && debug('cache_'.__FUNCTION__.'[]', array(
+			'name'			=> $name,
+			'name_real'		=> $key_name_ns,
+			'driver'		=> $this->DRIVER,
+			'time'			=> round(microtime(true) - $time_start, 5),
+		));
 		return $result;
 	}
 
 	/**
 	* Delete selected cache entry (alias)
 	*/
-	function del ($cache_name = '') {
-		return $this->refresh($cache_name, true);
+	function refresh ($name = '') {
+		return $this->del($name, true);
 	}
 
 	/**
-	* Clean selected cache entry
+	* Clean selected cache entry (alias)
 	*/
-	function clean ($cache_name = '') {
-		return $this->refresh($cache_name, true);
+	function clean ($name = '') {
+		return $this->del($name, true);
 	}
 
 	/**
-	* Update all cache entries
+	* Clean selected cache entry (alias)
 	*/
-	function refresh_all () {
-		foreach ((array)conf('data_handlers') as $name => $v) {
-			$this->refresh($name);
-			$this->refresh('locale:'.$name);
-		}
+	function clear ($name = '') {
+		return $this->del($name, true);
 	}
 
 	/**
-	* Do get cache file contents
+	* Put data into cache (alias for 'set')
 	*/
-	function _get_cache_file ($cache_file = '', $force_ttl = 0) {
-		if (empty($cache_file)) {
-			return null;
-		}
-		if (!file_exists($cache_file)) {
-			return null;
-		}
-		// Delete expired cache files
-		$last_modified = filemtime($cache_file);
-		$TTL = intval($force_ttl ? $force_ttl : $this->FILES_TTL);
-		if ($last_modified < (time() - $TTL)) {
-			return null;
-		}
-		if ($this->INCLUDE_CACHE_FILES) {
-			$data = array();
-			if ($this->DEBUG_MODE) {
-				$_time_start = microtime(true);
-			}
-
-			include ($cache_file);
-
-			if ($this->DEBUG_MODE) {
-				$_cf = strtolower(str_replace(DIRECTORY_SEPARATOR, '/', $cache_file));
-				debug('include_files_exec_time::'.$_cf, microtime(true) - $_time_start);
-			}
-			return $data;
-		} else {
-			$output = eval('return '.substr(file_get_contents($cache_file), strlen($this->_file_conf['auto_header']), -strlen($this->_file_conf['auto_footer'])).';');
-			// Check if file has parse error
-			if ($output === false) {
-				trigger_error('CACHE: Parse error in file "'.basename($cache_file).'"', E_USER_WARNING);
-			}
-			return $output;
-		}
+	function put ($name = '', $data = null, $ttl = 0) {
+		return $this->set($name, $data, $ttl);
 	}
 
 	/**
-	* Do put cache file contents
+	* Clean all cache entries
 	*/
-	function _put_cache_file ($data = array(), $cache_file = '') {
-		if (empty($cache_file)) {
+	function flush () {
+		if (!$this->_driver_ok) {
 			return false;
 		}
-		return file_put_contents($cache_file, 
-			$this->_file_conf['auto_header']
-			.'$data = '.str_replace(' => '.PHP_EOL.'array (', '=>array(', preg_replace('/^\s+/m', '', var_export($data, 1))).';'
-			.$this->_file_conf['auto_footer']
-		);
+		if (DEBUG_MODE) {
+			$time_start = microtime(true);
+		}
+		$result = $this->_driver->flush();
+		DEBUG_MODE && debug('cache_'.__FUNCTION__.'[]', array(
+			'data'		=> $result,
+			'driver'	=> $this->DRIVER,
+			'time'		=> microtime(true) - $time_start,
+		));
+		return $result;
 	}
 
 	/**
-	* Process given rule name
+	* Clean all cache entries (alias)
 	*/
-	function _process_rule ($rule_name = '', $locale_specific = false) {
-		$data = array();
-		$no_cache = false;
-		$rule_data = conf('data_handlers::'.$rule_name);
-		if (!empty($rule_name) && $rule_data) {
-			$data = eval(
-				($locale_specific ? '$locale="'.conf('language').'";' : '')
-				.$rule_data
-				.'; return $data;'
-			);
-		}
-		if ($no_cache) {
-			$this->_no_cache[$rule_name];
-		}
-		return $data;
+	function clean_all () {
+		return $this->flush();
 	}
 
 	/**
-	* Clears all cache files inside cache folder
+	* Clean all cache entries (alias)
+	*/
+	function clear_all () {
+		return $this->flush();
+	}
+
+	/**
+	* Clean all cache entries (alias)
+	*/
+	function refresh_all () {
+		return $this->flush();
+	}
+
+	/**
+	* Clears all cache entries (alias)
 	*/
 	function _clear_cache_files () {
-		return $this->_clear_all();
+		return $this->flush();
 	}
 
 	/**
-	* Clears all cache entries (do not use widely!)
+	* Get several cache entries at once
 	*/
-	function _clear_all () {
-		if ($this->DRIVER == 'memcache') {
-			if (isset($this->_memcache)) {
-				return $this->_memcache->flush();
-			} else {
-				$this->DRIVER = 'file';
+	function multi_get ($names = array(), $force_ttl = 0, $params = array()) {
+		if (!$this->_driver_ok) {
+			return false;
+		}
+		if ($this->NO_CACHE) {
+			return false;
+		}
+		if (DEBUG_MODE) {
+			$time_start = microtime(true);
+		}
+		if (!empty($this->_no_cache)) {
+			foreach ((array)$names as $k => $name) {
+				if (isset($this->_no_cache[$name])) {
+					unset($names[$k]);
+				}
 			}
 		}
-		if ($this->DRIVER == 'file') {
-			$dh = opendir(CORE_CACHE_DIR);
-			if (!$dh) {
-				return false;
-			}
-			while (($f = readdir($dh)) !== false) {
-				if ($f == '.' || $f == '..' || !is_file(CORE_CACHE_DIR.$f)) {
-					continue;
-				}
-				if (pathinfo($f, PATHINFO_EXTENSION) != 'php') {
-					continue;
-				}
-				if (substr($f, 0, strlen($this->_file_conf['file_prefix'])) != $this->_file_conf['file_prefix']) {
-					continue;
-				}
-				if (file_exists(CORE_CACHE_DIR.$f)) {
-					unlink(CORE_CACHE_DIR.$f);
+		if ($this->_driver->implemented['multi_get']) {
+			$result = $this->_driver->multi_get($names, $force_ttl, $params);
+		} else {
+			$result = array();
+			foreach ((array)$names as $name) {
+				$res = $this->get($name, $force_ttl, $params);
+				if (isset($res)) {
+					$result[$name] = $res;
 				}
 			}
-			closedir($dh);
-			return true;
-		} elseif ($this->DRIVER == 'eaccelerator') {
-			return eaccelerator_clear();
-		} elseif ($this->DRIVER == 'apc') {
-			return apc_clear_cache();
-		} elseif ($this->DRIVER == 'xcache') {
-			return xcache_clear_cache();
 		}
+		DEBUG_MODE && debug('cache_'.__FUNCTION__.'[]', array(
+			'names'		=> $names,
+			'data'		=> $result,
+			'driver'	=> $this->DRIVER,
+			'time'		=> microtime(true) - $time_start,
+		));
+		return $result;
 	}
 
 	/**
-	* Escape html and framework specific symbols to display in debug console
+	* Set several cache entries at once
 	*/
-	function _debug_escape($string = '') {
-		return str_replace(array_keys($this->_debug_escape_symbols), array_values($this->_debug_escape_symbols), htmlspecialchars($string, ENT_QUOTES));
+	function multi_set ($data = array(), $ttl = 0) {
+		if (!$this->_driver_ok) {
+			return false;
+		}
+		if ($this->NO_CACHE) {
+			return false;
+		}
+		if (DEBUG_MODE) {
+			$time_start = microtime(true);
+		}
+		if (!empty($this->_no_cache)) {
+			foreach ((array)$this->_no_cache as $name => $tmp) {
+				if (isset($data[$name])) {
+					unset($data[$name]);
+				}
+			}
+		}
+		if ($this->_driver->implemented['multi_set']) {
+			$result = $this->_driver->multi_set($data, $ttl);
+		} else {
+			$result = array();
+			foreach ((array)$data as $name => $_data) {
+				$result[$name] = $this->set($name, $_data, $ttl);
+			}
+		}
+		DEBUG_MODE && debug('cache_'.__FUNCTION__.'[]', array(
+			'data'		=> $data,
+			'driver'	=> $this->DRIVER,
+			'time'		=> microtime(true) - $time_start,
+		));
+		return $result;
 	}
 
 	/**
-	* Print nice 
+	* Del several cache entries at once
 	*/
-	function trace_string() {
-		$e = new Exception();
-		$data = implode(PHP_EOL, array_slice(explode(PHP_EOL, $e->getTraceAsString()), 1, -1));
-		return $data;
+	function multi_del ($names = array()) {
+		if (!$this->_driver_ok) {
+			return false;
+		}
+		if (DEBUG_MODE) {
+			$time_start = microtime(true);
+		}
+		$result = ($this->_driver->implemented['multi_del'] && !is_null($this->_driver->multi_del($names)));
+		if( !$result ) {
+			$result = array();
+			foreach ((array)$names as $name) {
+				$result[$name] = $this->del($name);
+			}
+		}
+		DEBUG_MODE && debug('cache_'.__FUNCTION__.'[]', array(
+			'names'		=> $names,
+			'data'		=> $result,
+			'driver'	=> $this->DRIVER,
+			'time'		=> microtime(true) - $time_start,
+		));
+		return $result;
+	}
+
+	/**
+	*/
+	function list_keys () {
+		if (!$this->_driver_ok) {
+			return false;
+		}
+		if (DEBUG_MODE) {
+			$time_start = microtime(true);
+		}
+		if (!$this->_driver->implemented['list_keys']) {
+			return null;
+		}
+		$result = $this->_driver->list_keys();
+		if ($this->CACHE_NS && $result) {
+			$ns_len = strlen($this->CACHE_NS);
+			foreach ($result as $k => $v) {
+				if (substr($v, 0, $ns_len) != $this->CACHE_NS) {
+					unset($result[$k]);
+				} else {
+					$result[$k] = substr($v, $ns_len);
+				}
+			}
+		}
+		if ($result) {
+			asort($result);
+			$result = array_values($result);
+		}
+		DEBUG_MODE && debug('cache_'.__FUNCTION__.'[]', array(
+			'data'		=> $result,
+			'driver'	=> $this->DRIVER,
+			'time'		=> microtime(true) - $time_start,
+		));
+		return $result;
+	}
+
+	/**
+	*/
+	function del_by_prefix ($prefix = '') {
+		if (DEBUG_MODE) {
+			$time_start = microtime(true);
+		}
+		if (!strlen($prefix) || !is_string($prefix)) {
+			$result = $this->flush();
+		} else {
+			$prefix_len = strlen($prefix);
+			$result = $this->list_keys();
+			if ($result) {
+				foreach ($result as $k => $v) {
+					if (substr($v, 0, $prefix_len) != $prefix) {
+						unset($result[$k]);
+					}
+				}
+			}
+			$result && $this->multi_del($result);
+		}
+		DEBUG_MODE && debug('cache_'.__FUNCTION__.'[]', array(
+			'prefix'	=> $prefix,
+			'data'		=> $result,
+			'driver'	=> $this->DRIVER,
+			'time'		=> microtime(true) - $time_start,
+		));
+		return $result;
 	}
 }

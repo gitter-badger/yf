@@ -12,7 +12,6 @@ abstract class yf_installer_db {
 	/** @var bool */
 	public $USE_SQL_IF_NOT_EXISTS	= true;
 	/** @var array @conf_skip Required patterns */
-// TODO: complete this and add unit tests
 	public $_patterns	= array(
 		'table'		=> "/^CREATE[\s\t]*TABLE[\s\t]*[\`]{0,1}([^\s\t\`]+)[\`]{0,1}[\s\t]*\((.*)\)([^\(]*)\$/ims",
 		'split'		=> "/[\n]+,?/",
@@ -25,6 +24,7 @@ abstract class yf_installer_db {
 		'type'		=> '/([a-z]+)[\(]*([^\)]*)[\)]*/ims',
 // TODO: support for foreign keys
 // TODO: support for partitions
+		'comment'	=> '#\/\*\*([^\*\/]+)\*\*\/$#i',
 	);
 	/** @var int Lifetime for caches */
 	public $CACHE_TTL				= 86400; // 1*3600*24 = 1 day
@@ -73,6 +73,11 @@ abstract class yf_installer_db {
 	*	);
 	*/
 	function create_table_pre_hook($full_table_name, $table_struct, $db) {
+		_class('core_events')->fire('db.before_create_table', array(
+			'table'		=> $full_table_name,
+			'struct'	=> $table_struct,
+			'db'		=> $db,
+		));
 		foreach ((array)$this->create_table_pre_callbacks as $regex => $func) {
 			if (!preg_match('/'.$regex.'/ims', $full_table_name, $m)) {
 				continue;
@@ -86,6 +91,11 @@ abstract class yf_installer_db {
 	* This method can be inherited in project with custom rules inside.
 	*/
 	function create_table_post_hook($full_table_name, $table_struct, $db) {
+		_class('core_events')->fire('db.after_create_table', array(
+			'table'		=> $full_table_name,
+			'struct'	=> $table_struct,
+			'db'		=> $db,
+		));
 		foreach ((array)$this->create_table_post_callbacks as $regex => $func) {
 			if (!preg_match('/'.$regex.'/ims', $full_table_name, $m)) {
 				continue;
@@ -99,6 +109,12 @@ abstract class yf_installer_db {
 	* This method can be inherited in project with custom rules inside
 	*/
 	function alter_table_pre_hook($table_name, $column_name, $table_struct, $db) {
+		_class('core_events')->fire('db.before_alter_table', array(
+			'table'		=> $table_name,
+			'column'	=> $column_name,
+			'struct'	=> $table_struct,
+			'db'		=> $db,
+		));
 		foreach ((array)$this->alter_table_pre_callbacks as $table_regex => $func) {
 			if (!preg_match('/'.$regex.'/ims', $table_name, $m)) {
 				continue;
@@ -112,6 +128,12 @@ abstract class yf_installer_db {
 	* This method can be inherited in project with custom rules inside
 	*/
 	function alter_table_post_hook($table_name, $column_name, $table_struct, $db) {
+		_class('core_events')->fire('db.after_alter_table', array(
+			'table'		=> $table_name,
+			'column'	=> $column_name,
+			'struct'	=> $table_struct,
+			'db'		=> $db,
+		));
 		foreach ((array)$this->alter_table_post_callbacks as $table_regex => $func) {
 			if (!preg_match('/'.$regex.'/ims', $table_name, $m)) {
 				continue;
@@ -129,6 +151,7 @@ abstract class yf_installer_db {
 		$globs_sql = array(
 			'yf_main'			=> YF_PATH.'share/db_installer/sql/*.sql.php',
 			'yf_plugins'		=> YF_PATH.'plugins/*/share/db_installer/sql/*.sql.php',
+			'project_config'	=> CONFIG_PATH.'share/db_installer/sql/*.sql.php',
 			'project_main'		=> PROJECT_PATH.'share/db_installer/sql/*.sql.php',
 			'project_plugins'	=> PROJECT_PATH.'plugins/*/share/db_installer/sql/*.sql.php',
 		);
@@ -142,6 +165,7 @@ abstract class yf_installer_db {
 		$globs_data = array(
 			'yf_main'			=> YF_PATH.'share/db_installer/data/*.data.php',
 			'yf_plugins'		=> YF_PATH.'plugins/*/share/db_installer/data/*.data.php',
+			'project_config'	=> CONFIG_PATH.'share/db_installer/data/*.data.php',
 			'project_main'		=> PROJECT_PATH.'share/db_installer/data/*.data.php',
 			'project_plugins'	=> PROJECT_PATH.'plugins/*/share/db_installer/data/*.data.php',
 		);
@@ -354,6 +378,10 @@ abstract class yf_installer_db {
 			$table_raw_data = $raw_data;
 			$table_name		= $m9[1];
 			$raw_data		= $m9[2];
+		}
+		// Cut off comments with params
+		if (preg_match($this->_patterns['comment'], trim($raw_data), $m)) {
+			$raw_data = str_replace($m[0], '', $raw_data);
 		}
 		// Cleanup raw first
 		$cur_raw_lines = preg_split($this->_patterns['split'], trim(str_replace("\t", ' ', $raw_data)));

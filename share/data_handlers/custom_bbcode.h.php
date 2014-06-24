@@ -1,5 +1,6 @@
 <?php
 
+$data = array();
 $q = db()->query('SELECT * FROM '.db('custom_bbcode').' WHERE active="1"');
 while ($a = db()->fetch_assoc($q)) {
 	$data[$a['tag']] = array(
@@ -7,3 +8,4 @@ while ($a = db()->fetch_assoc($q)) {
 		'replace'	=> $a['replace']
 	);
 }
+return $data;

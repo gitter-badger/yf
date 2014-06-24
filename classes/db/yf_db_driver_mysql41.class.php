@@ -31,18 +31,25 @@ class yf_db_driver_mysql41 extends yf_db_driver {
 			trigger_error('MySQL db driver require missing php extension mysql', E_USER_ERROR);
 			return false;
 		}
-		$this->persistency	= $persistency;
-		$this->user			= $user;
-		$this->password		= $password;
-		$this->server		= $server;
-		$this->dbname		= $database;
-		$this->port			= $port ? $port : $DEF_PORT;
-		$this->socket		= $socket;
-		ini_set('mysql.connect_timeout', 2);
-		if (!file_exists($socket)) {
+		if (is_array($server)) {
+			$params = $server;
+			$server = '';
+		}
+		$this->server		= $params['host'] ?: $server;
+		$this->user			= $params['user'] ?: $user;
+		$this->password		= $params['pswd'] ?: $password;
+		$this->dbname		= $params['name'] ?: $database;
+		$this->persistency	= isset($params['persist']) ? $params['persist'] : $persistency;
+		$this->ssl			= isset($params['ssl']) ? $params['ssl'] : $use_ssl;
+		$this->port			= ($params['port'] ?: $port) ?: $this->DEF_PORT;
+		$this->socket		= $params['socket'] ?: $socket;
+		if (!file_exists($this->socket)) {
 			$this->socket = '';
 		}
-		$this->ALLOW_AUTO_CREATE_DB	= $allow_auto_create_db;
+		$this->charset		= ($params['charset'] ?: $charset) ?: (defined('DB_CHARSET') ? DB_CHARSET : $this->DEF_CHARSET);
+		$this->ALLOW_AUTO_CREATE_DB	= isset($params['allow_auto_create_db']) ? $params['allow_auto_create_db'] : $allow_auto_create_db;
+
+		ini_set('mysql.connect_timeout', 2);
 
 		$this->connect();
 
@@ -50,11 +57,8 @@ class yf_db_driver_mysql41 extends yf_db_driver {
 			conf_add('http_headers::X-Details','ME=(-1) MySql connection error');
 			return false;
 		}
-		if (empty($charset)) {
-			$charset = defined('DB_CHARSET') ? DB_CHARSET : $this->DEF_CHARSET;
-		}
-		if ($charset) {
-			$this->query('SET NAMES '. $charset);
+		if ($this->charset) {
+			$this->query('SET NAMES '. $this->charset);
 		}
 		return $this->db_connect_id;
 	}
@@ -236,7 +240,7 @@ class yf_db_driver_mysql41 extends yf_db_driver {
 
 	/**
 	*/
-	function meta_columns($table, $KEYS_NUMERIC = false, $FULL_INFO = false) {
+	function meta_columns($table, $KEYS_NUMERIC = false, $FULL_INFO = true) {
 		$retarr = array();
 
 		$Q = $this->query(sprintf($this->META_COLUMNS_SQL, $table));
@@ -259,16 +263,24 @@ class yf_db_driver_mysql41 extends yf_db_driver {
 			} elseif (preg_match('/^(.+)\((\d+)/', $type, $query_array)) {
 				$fld['type'] = $query_array[1];
 				$fld['max_length'] = is_numeric($query_array[2]) ? $query_array[2] : -1;
-			} elseif (preg_match('/^(enum)\((.*)\)$/i', $type, $query_array)) {
+			} elseif (preg_match('/^(enum|set)\((.*)\)$/i', $type, $query_array)) {
 				$fld['type'] = $query_array[1];
 				$fld['max_length'] = max(array_map('strlen',explode(',',$query_array[2]))) - 2; // PHP >= 4.0.6
 				$fld['max_length'] = ($fld['max_length'] == 0 ? 1 : $fld['max_length']);
+				$values = array();
+				foreach (explode(',', $query_array[2]) as $v) {
+					$v = trim(trim($v), '\'"');
+					if (strlen($v)) {
+						$values[$v] = $v;
+					}
+				}
+				$fld['values'] = $values;
 			} else {
 				$fld['type'] = $type;
 				$fld['max_length'] = -1;
 			}
 
-			if ($FULL_INFO) {
+#			if ($FULL_INFO) {
 				$fld['not_null']		= ($A[2] != 'YES');
 				$fld['primary_key']		= ($A[3] == 'PRI');
 				$fld['auto_increment']	= (strpos($A[5], 'auto_increment') !== false);
@@ -283,7 +295,7 @@ class yf_db_driver_mysql41 extends yf_db_driver {
 						$fld['has_default'] = false;
 					}
 				}
-			}
+#			}
 
 			if ($KEYS_NUMERIC) {
 				$retarr[] = $fld;

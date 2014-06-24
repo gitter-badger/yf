@@ -1,6 +1,7 @@
 <?php
 
 require_once dirname(__FILE__).'/yf_aliases.php';
+require_once dirname(__FILE__).'/yf_array_funcs.php';
 
 if (!function_exists('show_text')) {
 	function show_text ($text = '') { return _class('utils')->show_text($text); }
@@ -52,16 +53,6 @@ if (!function_exists('xsb_encode')) {
 if (!function_exists('xsb_decode')) {
 	function xsb_decode($string) { return _class('utils')->xsb_decode($string); }
 }
-if (!function_exists('process_url')) {
-	function process_url($url = '', $force_rewrite = false, $for_site_id = false) {
-		if (tpl()->REWRITE_MODE) {
-			module('rewrite')->_rewrite_replace_links($url, true, $force_rewrite, $for_site_id);
-		} elseif (substr($url, 0, 3) == './?') {
-			$url = WEB_PATH. substr($url, 2);
-		}
-		return $url;
-	}
-}
 if (!function_exists('_display_name')) {
 	function _display_name ($user_info = array()) {
 		if (is_string($user_info)) {
@@ -81,17 +72,6 @@ if (!function_exists('_prepare_phone')) {
 }
 if (!function_exists('smart_htmlspecialchars')) {
 	function smart_htmlspecialchars($html_text = '') { return _class('utils')->smart_htmlspecialchars($html_text); }
-}
-if (!function_exists('array_replace_recursive')) {
-	function array_replace_recursive($array_1, $array_2) {
-		if (!is_array($array_1) or !is_array($array_2)) {
-			return $array_2;
-		}
-		foreach ((array)$array_2 as $key_2 => $value_2) {
-			$array_1[$key_2] = array_replace_recursive(@$array_1[$key_2], $value_2);
-		}
-		return $array_1;
-	}
 }
 if (!function_exists('format_bbcode_text')) {
 	function format_bbcode_text ($body = '') { return $body ? _class('bb_codes')->_process_text($body) : ''; }
@@ -176,8 +156,8 @@ if (!function_exists('_account_info')) {
 	function _account_info ($account_id) { return _class('utils')->_account_info($account_id); }
 }
 if (!function_exists('my_explode')) {
-	function my_explode ($string = '', $divider = "\n") {
-		$result = explode("\n", trim($string));
+	function my_explode ($string = '', $divider = PHP_EOL) {
+		$result = explode($divider, trim($string));
 		foreach ((array)$result as $k => $v) {
 			$v = trim($v);
 			if (!strlen($v)) {
@@ -203,6 +183,7 @@ if (!function_exists('object_to_array')) {
 		}
 	}
 }
+// TODO: unit tests
 if (!function_exists('obj2arr')) {
 	// Much faster (10x) implementation of object_to_array()
 	function obj2arr(&$obj) {
@@ -225,17 +206,13 @@ if (!function_exists('array_to_object')) {
 		}
 	}
 }
-// Locale safe floatval
 if (!function_exists('_floatval')) {
-	function _floatval ($val = 0) {
-#		return floatval(str_replace(',', '.', $val));
-		return tofloat($val);
-	}
+	function _floatval ($val = 0) { return tofloat($val); }
 }
 /*
-This function takes the last comma or dot (if any) to make a clean float, ignoring thousand separator, currency or any other letter
-$num = '1.999,369€';  var_dump(tofloat($num)); // float(1999.369)
-$otherNum = '126,564,789.33 m²';  var_dump(tofloat($otherNum)); // float(126564789.33)
+* This function takes the last comma or dot (if any) to make a clean float, ignoring thousand separator, currency or any other letter
+* $num = '1.999,369€';  var_dump(tofloat($num)); // float(1999.369)
+* $otherNum = '126,564,789.33 m²';  var_dump(tofloat($otherNum)); // float(126564789.33)
 */
 if (!function_exists('tofloat')) {
 	function tofloat($num = 0) {
@@ -257,35 +234,45 @@ if (!function_exists('tofloat')) {
 }
 // Use this to corrently insert user input into mysql decimal field with float typecasting in the middle
 if (!function_exists('todecimal')) {
-	function todecimal($num = 0) {
+	function todecimal($num = 0, $digits = 2) {
 		if (is_array($num)) {
 			return array_map(__FUNCTION__, $num);
 		}
-		return str_replace(',', '.', round(tofloat($num), 2));
+		return str_replace(',', '.', round(tofloat($num), $digits));
 	}
 }
 
 // Used by tpl, form, table to convert str like this: k1=v1,k2=v2;k3=v3
 if (!function_exists('_attrs_string2array')) {
-	function _attrs_string2array($string = '') {
-// TODO: unit tests
+	function _attrs_string2array($string = '', $strip_quotes = true) {
 		$output_array = array();
+		if (!is_string($string)) {
+			return array();
+		}
 		foreach (explode(';', str_replace(',', ';', trim($string))) as $tmp_string) {
-			list($try_key, $try_value) = explode('=', trim($tmp_string));
-			$try_key = trim(trim(trim($try_key), '"'));
-			$try_value = trim(trim(trim($try_value), '"'));
-			if (strlen($try_key) && strlen($try_value)) {
-				$output_array[$try_key] = $try_value;
+			$tmp_string = trim($tmp_string);
+			if ($strip_quotes) {
+				$tmp_string = trim(trim($tmp_string, '"\''));
+			}
+			list($try_key, $try_value) = explode('=', $tmp_string);
+			$try_key = trim($try_key);
+			$try_value = trim($try_value);
+			if ($strip_quotes) {
+				$try_key = trim(trim($try_key, '"\''));
+				$try_value = trim(trim($try_value, '"\''));
+			}
+			if (strlen($try_key)) {
+				$output_array[$try_key] = (string)$try_value;
 			}
 		}
 		return $output_array;
 	}
 }
 
+// TODO: unit tests
 // We need this to avoid encoding & => &amp; by standard htmlspecialchars()
 if (!function_exists('_htmlchars')) {
 	function _htmlchars($str = '') {
-// TODO: unit tests
 		if (is_array($str)) {
 			foreach ((array)$str as $k => $v) {
 				$str[$k] = _htmlchars($v);
@@ -300,4 +287,97 @@ if (!function_exists('_htmlchars')) {
 		);
 		return str_replace(array_keys($replace), array_values($replace), $str);
 	}
+}
+
+// TODO: unit tests
+// Build string of html attributes, used by high-level html generators like form, table, html
+if (!function_exists('_attrs')) {
+	function _attrs($extra, $names) {
+		$body = array();
+		$a = array();
+		foreach ((array)$names as $name) {
+			if (strlen($name) && isset($extra[$name])) {
+				$a[$name] = $extra[$name];
+			}
+		}
+		// Try to find and allow all data-* and ng-* attributes automatically
+		foreach ((array)$extra as $name => $val) {
+			if (strpos($name, 'data-') === 0 || strpos($name, 'ng-') === 0) {
+				$a[$name] = $val;
+			}
+		}
+		// Custom html attributes forced with sub-array "attr"
+		if (is_array($extra['attr'])) {
+			foreach ($extra['attr'] as $name => $val) {
+				$a[$name] = $extra[$name];
+			}
+		}
+		foreach ($a as $name => $val) {
+			if (is_array($val)) {
+				$body[$name] = _htmlchars($name).'="'.http_build_query(_htmlchars($val)).'"';
+			} else {
+				if (!strlen($val)) {
+					continue;
+				}
+				$body[$name] = _htmlchars($name).'="'._htmlchars($val).'"';
+			}
+		}
+		return $body ? ' '.implode(' ', $body) : '';
+	}
+}
+
+if (!function_exists('load_db_class')) {
+	function load_db_class() {
+		static $_loaded_class;
+		if ($_loaded_class) {
+			return $_loaded_class;
+		}
+		$classes = array(
+			'db'	=> INCLUDE_PATH.'classes/db.class.php',
+			'yf_db'	=> YF_PATH.'classes/yf_db.class.php',
+		);
+		foreach ((array)$classes as $cl => $f) {
+			if (!file_exists($f)) {
+				continue;
+			}
+			require_once $f;
+			if (class_exists($cl)) {
+				$_loaded_class = $cl;
+				return $_loaded_class;
+			}
+		}
+		return false;
+	}
+}
+
+if (!function_exists('cache_memcached_connect')) {
+function cache_memcached_connect($params = array()) {
+	if (isset($GLOBALS['memcache_obj'])) {
+		return $GLOBALS['memcache_obj'];
+	}
+	if (!$params) {
+		$conf_host = $GLOBALS['CONF']['MEMCACHED_HOST'];
+		$conf_port = $GLOBALS['CONF']['MEMCACHED_PORT'];
+		$params = array(
+			'host'	=> $conf_host ? $conf_host : '127.0.0.1',
+			'port'	=> $conf_port ? $conf_port : 11211,
+		);
+	}
+	$GLOBALS['memcache_obj'] = null;
+	if (class_exists('Memcached')) {
+		$GLOBALS['memcache_obj'] = new Memcached();
+		$GLOBALS['memcache_obj']->addServer($params['host'], $params['port']);
+	} elseif (function_exists('memcache_connect')) {
+		$GLOBALS['memcache_obj'] = memcache_connect($params['host'], $params['port']);
+	}
+	return $GLOBALS['memcache_obj'];
+}
+}
+
+if (!function_exists('_var_dump')) {
+function _var_dump($data) {
+	ob_start();
+	var_dump($data);
+	return ob_get_clean();
+}
 }

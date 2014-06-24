@@ -1,61 +1,37 @@
 #!/usr/bin/php
 <?php
 
-$force = trim($argv[2]);
-$project_path = trim($argv[1]);
-if (!$project_path) {
-	exit('Error: missing project_path. Example: '.basename(__FILE__).' /home/www/test2/'.PHP_EOL);
+$lang = 'ru';
+if (strlen($argv[2]) == 2) {
+	$lang = $argv[2];
 }
-$project_path = rtrim($project_path, '/').'/';
-foreach (array('', '*/', '*/*/', '*/*/*/') as $g) {
-	$paths = glob($project_path. $g. 'db_setup.php');
-	if (!$paths || !isset($paths[0])) {
-		continue;
-	}
-	$fp = $paths[0];
-	if ($fp && file_exists($fp)) {
-		require $fp;
-		break;
-	}
+
+require_once dirname(dirname(__FILE__)).'/scripts_init.php';
+
+function load_data($lang) {
+	require dirname(__FILE__).'/countries'.($lang && $lang != 'en' ? '_'.$lang : '').'.php';
+	return $data;
 }
-if (!defined('DB_NAME')) {
-	exit('Error: cannot init database connection.');
-}
-require dirname(__FILE__).'/countries.php';
+$data = load_data($lang);
 if (!$data) {
 	exit('Error: $data is missing');
 }
-###########
-if (!defined('YF_PATH')) {
-	define('YF_PATH', dirname(dirname(dirname(dirname(__FILE__)))).'/');
-	require YF_PATH.'classes/yf_main.class.php';
-	new yf_main('admin', $no_db_connect = false, $auto_init_all = true);
+foreach($data as &$v) {
+	$v['name_eng'] = $v['name'];
 }
-###########
-$table = DB_PREFIX.'countries';
-$tables = db()->get_2d('show tables');
-$table_exists = in_array($table, $table2);
-
-$drop_table_sql = "DROP TABLE IF EXISTS `".$table."`;".PHP_EOL;
-$create_table_sql = "CREATE TABLE IF NOT EXISTS `".$table."` (
-  `code` char(2) NOT NULL DEFAULT '',
-  `code3` char(3) NOT NULL DEFAULT '',
-  `num` char(3) NOT NULL DEFAULT '',
-  `name` varchar(64) NOT NULL DEFAULT '',
-  `cont` char(2) NOT NULL DEFAULT '',
-  `active` enum('0','1') NOT NULL DEFAULT '0',
-  PRIMARY KEY (`code`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;".PHP_EOL;
-
-$sql = db()->insert($table, _es($data), $only_sql = true);
-if (!$table_exists || $force) {
-#	echo $drop_table_sql;
-	db()->query($drop_table_sql) or print_r(db()->error());
-#	echo $create_table_sql;
-	db()->query($create_table_sql) or print_r(db()->error());
+if ($lang != 'en') {
+	$data_en = load_data('en');
+	foreach($data as $k => &$v) {
+		$v['name_eng'] = $data_en[$k]['name'];
+	}
 }
-#echo $sql.PHP_EOL;
-db()->query($sql) or print_r(db()->error());
+$table = DB_PREFIX. 'geo_countries';
+if ( ! db()->utils()->table_exists($table) || $force) {
+	db()->utils()->drop_table($table);
+	db()->utils()->create_table($table);
+}
+db()->insert_safe($table, $data) or print_r(db()->error());
+db()->update($table, array('active' => 1), 'code IN("ua","ru","by","es","de","us")');
 
 echo 'Trying to get 2 first records: '.PHP_EOL;
 print_r(db()->get_all('SELECT * FROM '.$table.' LIMIT 2'));

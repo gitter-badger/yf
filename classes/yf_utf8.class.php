@@ -19,6 +19,13 @@ class yf_utf8 {
 	public $UNICODE_MULTIBYTE = 1;
 
 	/**
+	* Catch missing method call
+	*/
+	function __call($name, $args) {
+		return main()->extend_call($this, $name, $args);
+	}
+
+	/**
 	* Constructor
 	*
 	* @access	public
@@ -26,14 +33,6 @@ class yf_utf8 {
 	*/
 	function __construct () {
 		list($this->MULTIBYTE) = $this->unicode_check();
-	}
-
-	/**
-	* Catch missing method call
-	*/
-	function __call($name, $arguments) {
-		trigger_error(__CLASS__.': No method '.$name, E_USER_WARNING);
-		return false;
 	}
 
 	/**
@@ -296,7 +295,13 @@ class yf_utf8 {
 		// We store named entities in a table for quick processing.
 		if (!isset($table)) {
 			// Get all named HTML entities.
-			$table = array_flip(get_html_translation_table(HTML_ENTITIES));
+			$table = array_flip(array(
+				'"' => '&quot;',
+				'&' => '&amp;',
+				'\'' => '&#039;',
+				'<' => '&lt;',
+				'>' => '&gt;',
+			));
 			// PHP gives us ISO-8859-1 data, we need UTF-8.
 			$table = array_map('utf8_encode', $table);
 			// Add apostrophe (XML)
