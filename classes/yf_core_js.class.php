@@ -57,6 +57,9 @@ class yf_core_js {
 		if ($module_js_path) {
 			$this->add_file($module_js_path);
 		}
+		if (!is_array($params)) {
+			$params = array();
+		}
 		if ($params['packed']) {
 			$packed = $this->_show_packed_content($params);
 			// Degrade gracefully
