@@ -43,6 +43,9 @@ class yf_core_css {
 		if ($module_css_path) {
 			$this->add_file($module_css_path);
 		}
+		if (!is_array($params)) {
+			$params = array();
+		}
 		if ($params['packed']) {
 			$packed = $this->_show_packed_content($params);
 			// Degrade gracefully
